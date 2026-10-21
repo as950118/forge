@@ -33,7 +33,7 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 		initCmd(),
 		skillCmd(),
 		mcpCmd(),
-		stub("tool", "Manage custom tools (add|list|show|remove|enable|disable|test)", "TASK-0006"),
+		toolCmd(),
 		stub("profile", "Manage profiles (create|use|list)", "TASK-0012"),
 		stub("sync", "Sync registry to client configs [--target] [--dry-run] [--diff]", "TASK-0010"),
 		stub("history", "Query usage history [--kind] [--since] [--client] [--json]", "TASK-0009"),
