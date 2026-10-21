@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -11,7 +12,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/heonjinjeong/forge/internal/gateway"
+	"github.com/heonjinjeong/forge/internal/ledger"
 	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/heonjinjeong/forge/internal/tool"
 )
 
 func openMCP(cmd *cobra.Command) (*mcp.Registry, func(), error) {
@@ -39,15 +44,7 @@ func mcpCmd() *cobra.Command {
 	cmd.AddCommand(
 		mcpAddCmd(), mcpListCmd(), mcpShowCmd(), mcpRemoveCmd(), mcpRefreshCmd(),
 		mcpToggleCmd("enable", true), mcpToggleCmd("disable", false), mcpExposeCmd(),
-		&cobra.Command{
-			Use:                "serve",
-			Short:              "Run the Forge MCP gateway (not implemented yet)",
-			DisableFlagParsing: true,
-			RunE: func(cmd *cobra.Command, _ []string) error {
-				fmt.Fprintln(cmd.OutOrStdout(), "forge mcp serve: not implemented yet (TASK-0007)")
-				return nil
-			},
-		},
+		mcpServeCmd(),
 	)
 	return cmd
 }
@@ -71,7 +68,10 @@ func mcpAddCmd() *cobra.Command {
 값 규칙: KEY=${ENV_NAME} 은 환경변수 참조로 저장, KEY=literal 은 TOKEN/KEY/SECRET/PASSWORD/AUTH 등
 비밀로 보이는 이름이 아니고 값도 토큰/키 형태(sk-, ghp_, eyJ..., Bearer ..., 긴 무작위 문자열)가 아닐 때만 허용합니다.
 URL 경로/쿼리와 -- 뒤 인자에도 같은 검사를 적용하며, 비밀이 감지되면 저장을 거부합니다(우회 옵션 없음). keychain 참조는 아직 지원하지 않습니다.
-셸이 값을 확장하지 않도록 '${ENV_NAME}' 처럼 작은따옴표로 감싸세요.`,
+셸이 값을 확장하지 않도록 '${ENV_NAME}' 처럼 작은따옴표로 감싸세요.
+
+환경: stdio 서버는 refresh 와 게이트웨이 모두 최소 환경(PATH/HOME/LANG/프록시 등)과 --env 로 선언한 변수만 받습니다.
+부모 셸의 다른 환경변수(API 키 등)는 전달되지 않으므로 서버가 필요로 하는 변수는 --env KEY='${KEY}' 로 선언하세요.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -451,5 +451,61 @@ func mcpRefreshCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON 출력")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "실패 시 SDK/OS 원문 진단(detail)도 표시")
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "서버당 타임아웃 (예: 10s). 기본은 서버 설정 또는 30s")
+	return cmd
+}
+
+func mcpServeCmd() *cobra.Command {
+	var client, name string
+	cmd := &cobra.Command{
+		Use:   "serve [--client claude-code|opencode|auto] [--name forge]",
+		Short: "Run the Forge MCP gateway on stdio (custom tools, MCP proxy, forge_skill)",
+		Long: `Forge 를 stdio MCP 서버(게이트웨이)로 실행합니다. 클라이언트에는 이 서버 하나만 등록하면 됩니다.
+
+  claude mcp add --scope user forge -- forge mcp serve
+  opencode.json:  "mcp": {"forge": {"type": "local", "command": ["forge", "mcp", "serve"]}}
+
+노출 대상: 활성 커스텀 도구(forge_<이름>), exposure=gateway 인 MCP 서버의 캐시된 도구(<서버>__<도구>),
+스킬 조회 forge_skill, 목록 forge_list. 이름 규칙과 보안 정책은 docs/gateway.md 를 보세요.
+표준 출력은 프로토콜 전용이며 로그는 FORGE_GATEWAY_DEBUG=1 일 때만 표준 오류로 나옵니다.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if os.Getenv(gateway.EnvActive) == "1" {
+				return errors.New("게이트웨이 안에서 다시 forge mcp serve 를 실행할 수 없습니다 (재귀 방지). 등록된 MCP 서버 중 forge mcp serve 가 있는지 확인하세요")
+			}
+			// The gateway is started by a client from a configured setup, never
+			// the place to bootstrap state: do not create or migrate the home.
+			home, err := store.Home()
+			if err != nil {
+				return err
+			}
+			if st, err := os.Stat(store.DBPath(home)); err != nil || st.IsDir() {
+				return errors.New("Forge 저장소가 초기화되지 않았습니다 (" + store.DBPath(home) + "). forge init 을 먼저 실행하세요 (FORGE_HOME 을 쓰는 경우 클라이언트 설정의 env 에 같은 값을 지정했는지 확인)")
+			}
+			// Validate the database before anything is created: a corrupt forge.db
+			// must not leave skills/ or tmp/ behind (openRegistry creates them).
+			if err := store.CheckReadable(cmd.Context(), store.DBPath(home)); err != nil {
+				return fmt.Errorf("forge.db 를 열 수 없습니다(손상?): %s. 백업이 있으면 복원하거나 forge doctor 를 확인하세요", err)
+			}
+			skills, conn, err := openRegistry(cmd.Context())
+			if err != nil {
+				return err
+			}
+			defer conn.Close()
+			cwd, _ := os.Getwd()
+			gw, err := gateway.New(gateway.Options{
+				Name: name, Version: cmd.Root().Version, Client: client, Project: cwd,
+				Servers:  &mcp.Registry{DB: conn},
+				Tools:    &tool.Registry{DB: conn, Home: skills.Home},
+				Skills:   skills,
+				Recorder: &ledger.SQLite{DB: conn},
+			})
+			if err != nil {
+				return err
+			}
+			return gw.ServeStdio(cmd.Context())
+		},
+	}
+	cmd.Flags().StringVar(&client, "client", "auto", "클라이언트: claude-code|opencode|auto (auto = initialize 의 clientInfo 로 식별, 모르면 gateway 노출만)")
+	cmd.Flags().StringVar(&name, "name", gateway.DefaultName, "클라이언트 설정에 등록한 게이트웨이 서버 이름 (도구 이름 길이 계산과 자기 자신 프록시 방지에 사용)")
 	return cmd
 }

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/heonjinjeong/forge/internal/mcp/mcptest"
 	"github.com/heonjinjeong/forge/internal/store"
@@ -349,8 +352,10 @@ func TestRefreshEnvRefResolvedOnlyForChild(t *testing.T) {
 		t.Fatalf("%+v %v", res, err)
 	}
 	info, _ := reg.Get(ctx, "envref")
-	if len(info.Tools) != 1 || info.Tools[0].Description != secret {
-		t.Errorf("child did not receive resolved env: %+v", info.Tools)
+	// The child got the resolved value (it echoes it in the description) but the
+	// cache holds only the masked text.
+	if len(info.Tools) != 1 || info.Tools[0].Description != "***" {
+		t.Errorf("child did not receive resolved env or cache is unmasked: %+v", info.Tools)
 	}
 	// Unset reference -> env_missing, never run.
 	v2, _ := ParseValue(SlotEnv, "OTHER=${FORGE_TEST_UNSET_XYZ}")
@@ -710,5 +715,144 @@ func TestRefreshErrorsHideSDKWording(t *testing.T) {
 		if !strings.Contains(res.Detail, "initialize") {
 			t.Errorf("%s: raw detail missing: %q", name, res.Detail)
 		}
+	}
+}
+
+func TestRefreshDoesNotInheritParentEnv(t *testing.T) {
+	reg, _ := newReg(t)
+	ctx := context.Background()
+	// Only in the parent environment, never declared on the server.
+	t.Setenv("MOCK_TOOLS", "from_parent")
+	t.Setenv("NODE_OPTIONS", "--require=evil")
+	t.Setenv("npm_config__authToken", "tok")
+	if err := reg.Add(ctx, stdioSpec("undecl", stdioEnv("ok", "", ""))); err != nil {
+		t.Fatal(err)
+	}
+	res, err := reg.Refresh(ctx, "undecl", RefreshOptions{Timeout: 20 * time.Second})
+	if err != nil || !res.OK {
+		t.Fatalf("%+v %v", res, err)
+	}
+	info, _ := reg.Get(ctx, "undecl")
+	if got := toolNames(info, false); len(got) != 2 || got[0] != "alpha" {
+		t.Errorf("parent MOCK_TOOLS leaked into discovery child: %v", got)
+	}
+	// Declared variables are passed.
+	if err := reg.Add(ctx, stdioSpec("decl", stdioEnv("ok", "from_decl", ""))); err != nil {
+		t.Fatal(err)
+	}
+	if res, err = reg.Refresh(ctx, "decl", RefreshOptions{Timeout: 20 * time.Second}); err != nil || !res.OK {
+		t.Fatalf("%+v %v", res, err)
+	}
+	info, _ = reg.Get(ctx, "decl")
+	if got := toolNames(info, false); len(got) != 1 || got[0] != "from_decl" {
+		t.Errorf("declared env not passed: %v", got)
+	}
+	for _, kv := range MinimalEnv() {
+		if strings.HasPrefix(kv, "NODE_OPTIONS=") || strings.HasPrefix(kv, "npm_config__authToken=") {
+			t.Errorf("unsafe variable in MinimalEnv: %s", kv)
+		}
+	}
+	if h := Hint(ClassProcessExit, ""); !strings.Contains(h, "--env KEY=${KEY}") {
+		t.Errorf("hint: %s", h)
+	}
+}
+
+func TestMinimalEnvDropsCredentialBearingValues(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://user:pw@proxy.example:8080")
+	t.Setenv("ALL_PROXY", "socks5://onlyuser@proxy.example:1080")
+	t.Setenv("NPM_CONFIG_REGISTRY", "https://tok@registry.example/")
+	t.Setenv("REQUESTS_CA_BUNDLE", "https://u:p@ca.example/bundle.pem")
+	t.Setenv("HTTP_PROXY", "http://proxy.example:8080")
+	t.Setenv("NO_PROXY", "localhost,127.0.0.1")
+	t.Setenv("npm_config_registry", "https://registry.example/path@v1") // '@' only after the host: no userinfo
+	env := strings.Join(MinimalEnv(), "\n")
+	for _, bad := range []string{"HTTPS_PROXY=", "ALL_PROXY=", "NPM_CONFIG_REGISTRY=", "REQUESTS_CA_BUNDLE=", "user:pw", "onlyuser", "tok@"} {
+		if strings.Contains(env, bad) {
+			t.Errorf("%q passed through MinimalEnv:\n%s", bad, env)
+		}
+	}
+	for _, good := range []string{"HTTP_PROXY=http://proxy.example:8080", "NO_PROXY=localhost,127.0.0.1", "npm_config_registry=https://registry.example/path@v1"} {
+		if !strings.Contains(env, good) {
+			t.Errorf("%q wrongly dropped", good)
+		}
+	}
+	dropped := strings.Join(MinimalEnvDropped(), ",")
+	if !strings.Contains(dropped, "HTTPS_PROXY") || strings.Contains(dropped, "pw") {
+		t.Errorf("dropped names: %s", dropped)
+	}
+	// declaring the variable passes it to the child explicitly
+	in := &Info{Name: "x", Transport: TransportStdio, Command: os.Args[0]}
+	tb, fail := newTransport(in, map[string]map[string]string{SlotEnv: {"HTTPS_PROXY": "http://user:pw@proxy.example:8080"}}, MinimalEnv())
+	if fail != nil {
+		t.Fatal(fail)
+	}
+	if got := strings.Join(tb.cmd.Env, "\n"); !strings.Contains(got, "HTTPS_PROXY=http://user:pw@proxy.example:8080") {
+		t.Errorf("declared variable not passed")
+	}
+	tb, _ = newTransport(in, nil, MinimalEnv())
+	if got := strings.Join(tb.cmd.Env, "\n"); strings.Contains(got, "HTTPS_PROXY=") {
+		t.Errorf("undeclared credential variable reached the child")
+	}
+	if h := Hint(ClassProcessExit, ""); !strings.Contains(h, "HTTPS_PROXY") {
+		t.Errorf("hint does not explain dropped proxy variables: %s", h)
+	}
+}
+
+// A server that echoes a declared (resolved) env value in a tool description must
+// not get it into the cache, and a changed secret is not a tool change.
+func TestRefreshMasksSecretsInCache(t *testing.T) {
+	reg, home := newReg(t)
+	ctx := context.Background()
+	const secret = "tok-ABCDEFGH-12345678"
+	t.Setenv("FORGE_TEST_MASK", secret)
+	v, _ := ParseValue(SlotEnv, "MOCK_DESC=${FORGE_TEST_MASK}")
+	if err := reg.Add(ctx, stdioSpec("mask", stdioEnv("ok", "t1", ""), v)); err != nil {
+		t.Fatal(err)
+	}
+	res, err := reg.Refresh(ctx, "mask", RefreshOptions{Timeout: 20 * time.Second})
+	if err != nil || !res.OK {
+		t.Fatalf("%+v %v", res, err)
+	}
+	info, _ := reg.Get(ctx, "mask")
+	if len(info.Tools) != 1 || info.Tools[0].Description != "***" {
+		t.Fatalf("%+v", info.Tools)
+	}
+	if _, err := reg.DB.ExecContext(ctx, `PRAGMA wal_checkpoint(FULL)`); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := reg.DB.QueryRowContext(ctx, `SELECT count(*) FROM mcp_tools WHERE description LIKE '%'||?||'%' OR input_schema LIKE '%'||?||'%' OR name LIKE '%'||?||'%'`, secret, secret, secret).Scan(&n); err != nil || n != 0 {
+		t.Errorf("secret in mcp_tools: n=%d err=%v", n, err)
+	}
+	for _, f := range []string{"forge.db", "forge.db-wal"} {
+		if b, err := os.ReadFile(filepath.Join(home, f)); err == nil && strings.Contains(string(b), secret) {
+			t.Errorf("%s contains the secret", f)
+		}
+	}
+	// Rotating the secret changes the (masked) description input but not the stored
+	// masked content: the tool must not be reported as changed.
+	t.Setenv("FORGE_TEST_MASK", "tok-ZZZZZZZZ-99999999")
+	res, err = reg.Refresh(ctx, "mask", RefreshOptions{Timeout: 20 * time.Second})
+	if err != nil || !res.OK || res.Changed != 0 || res.Added != 0 {
+		t.Errorf("secret rotation reported as change: %+v %v", res, err)
+	}
+}
+
+func TestMaskDiscoveredNameAndSchema(t *testing.T) {
+	secrets := map[string]bool{"s3cr3t-value": true, "s3cr3t": true}
+	d := &discovered{srvName: "srv s3cr3t", tools: []*sdk.Tool{{
+		Name: "t_s3cr3t-value", Description: "d s3cr3t-value",
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{
+			"k":      map[string]any{"type": "string", "description": "x \"s3cr3t-value\" y", "default": "s3cr3t"},
+			"s3cr3t": map[string]any{"enum": []any{"s3cr3t-value", 1.0}},
+		}},
+	}}}
+	maskDiscovered(d, secrets)
+	raw, _ := json.Marshal(d.tools[0])
+	if strings.Contains(string(raw), "s3cr3t") || strings.Contains(d.srvName, "s3cr3t") {
+		t.Errorf("unmasked: %s %s", raw, d.srvName)
+	}
+	if d.tools[0].Name != "t_***" {
+		t.Errorf("longest secret should be replaced whole: %q", d.tools[0].Name)
 	}
 }

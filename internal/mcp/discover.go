@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -134,6 +135,11 @@ func (r *Registry) Refresh(ctx context.Context, name string, opt RefreshOptions)
 		return res, nil
 	}
 	res.OK = true
+	// Everything the server returned is masked with this server's resolved secrets
+	// before it reaches the cache (and the change-detection hash): a server that
+	// echoes a declared env value in a tool description must not leak it into
+	// forge.db or `forge mcp show`.
+	maskDiscovered(d, secrets)
 	res.ServerName, res.ServerVersion, res.ProtocolVersion = d.srvName, d.srvVer, d.proto
 	if err := r.storeSuccess(ctx, id, now, d, res); err != nil {
 		return nil, err
@@ -229,6 +235,69 @@ func (r *Registry) storeSuccess(ctx context.Context, id, now int64, d *discovere
 	}
 	res.ToolCount = len(seen)
 	return tx.Commit()
+}
+
+// maskText replaces every resolved secret value in s with "***" (longest first,
+// so a secret that contains another one is replaced as a whole).
+func maskText(s string, secrets map[string]bool) string {
+	if len(secrets) == 0 {
+		return s
+	}
+	list := make([]string, 0, len(secrets))
+	for sec := range secrets {
+		if sec != "" {
+			list = append(list, sec)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool { return len(list[i]) > len(list[j]) })
+	for _, sec := range list {
+		s = strings.ReplaceAll(s, sec, "***")
+	}
+	return s
+}
+
+// maskAny masks every string (keys and values) of a decoded JSON value.
+func maskAny(v any, secrets map[string]bool) any {
+	switch x := v.(type) {
+	case string:
+		return maskText(x, secrets)
+	case []any:
+		for i := range x {
+			x[i] = maskAny(x[i], secrets)
+		}
+		return x
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[maskText(k, secrets)] = maskAny(e, secrets)
+		}
+		return out
+	}
+	return v
+}
+
+// maskDiscovered masks the server-supplied strings (tool names, descriptions,
+// input schemas, server info) with the resolved secrets. The tool hash is
+// computed from the masked values, so changing a secret is not reported as a
+// tool change.
+func maskDiscovered(d *discovered, secrets map[string]bool) {
+	if len(secrets) == 0 {
+		return
+	}
+	d.proto, d.srvName, d.srvVer = maskText(d.proto, secrets), maskText(d.srvName, secrets), maskText(d.srvVer, secrets)
+	for i, t := range d.tools {
+		c := *t
+		c.Name, c.Description = maskText(t.Name, secrets), maskText(t.Description, secrets)
+		if t.InputSchema != nil {
+			if raw, err := json.Marshal(t.InputSchema); err == nil {
+				var v any
+				if json.Unmarshal(raw, &v) == nil {
+					c.InputSchema = maskAny(v, secrets)
+				}
+			}
+		}
+		d.tools[i] = &c
+	}
 }
 
 func toolHash(name, desc string, schema []byte) string {
@@ -331,40 +400,11 @@ func discover(parent context.Context, in *Info, vals map[string]map[string]strin
 	defer cancel()
 
 	client := sdk.NewClient(&sdk.Implementation{Name: "forge", Version: "0"}, nil)
-	var (
-		transport sdk.Transport
-		cmd       *exec.Cmd
-		errBuf    = &tailBuf{}
-		dt        *diagTransport
-		lim       *lineLimit
-	)
-	switch in.Transport {
-	case TransportStdio:
-		cmd = exec.Command(in.Command, in.Args...)
-		if cmd.Err != nil {
-			return nil, &failure{class: ClassCommandNotFound, msg: fmt.Sprintf("실행 파일을 찾을 수 없습니다: %s", in.Command)}
-		}
-		cmd.Dir = in.Cwd
-		cmd.Env = os.Environ()
-		for k, v := range vals[SlotEnv] {
-			cmd.Env = append(cmd.Env, k+"="+v)
-		}
-		cmd.Stderr = errBuf
-		cmd.WaitDelay = 2 * time.Second
-		setProcGroup(cmd)
-		lim = &lineLimit{max: maxStdoutLine}
-		transport = &limitedCommandTransport{cmd: cmd, lim: lim}
-	case TransportHTTP, TransportSSE:
-		dt = &diagTransport{base: http.DefaultTransport, headers: vals[SlotHeader]}
-		hc := &http.Client{Transport: dt}
-		if in.Transport == TransportHTTP {
-			transport = &sdk.StreamableClientTransport{Endpoint: in.URL, HTTPClient: hc, MaxRetries: -1, DisableStandaloneSSE: true}
-		} else {
-			transport = &sdk.SSEClientTransport{Endpoint: in.URL, HTTPClient: hc}
-		}
-	default:
-		return nil, &failure{class: ClassProtocol, msg: "알 수 없는 transport: " + in.Transport}
+	tb, fail := newTransport(in, vals, MinimalEnv())
+	if fail != nil {
+		return nil, fail
 	}
+	transport, cmd, errBuf, dt, lim := tb.transport, tb.cmd, tb.errBuf, tb.dt, tb.lim
 
 	cs, err := client.Connect(ctx, transport, nil)
 	if err != nil {
@@ -508,11 +548,11 @@ func Hint(class, msg string) string {
 	case ClassAuthRequired:
 		return "인증이 필요합니다. --header 'Authorization=${ENV_NAME}' 로 토큰 환경변수를 지정하고, 현재 셸에 해당 환경변수가 설정되어 있는지 확인하세요."
 	case ClassConnection:
-		return "주소/포트/네트워크/프록시를 확인하세요. 서버가 실행 중인지도 확인하세요."
+		return "주소/포트/네트워크/프록시를 확인하세요. 서버가 실행 중인지도 확인하세요. (stdio 서버에는 ://user:pw@ 자격 증명이 든 HTTPS_PROXY 같은 변수가 전달되지 않습니다: --env HTTPS_PROXY=${HTTPS_PROXY} 로 선언)"
 	case ClassEnvMissing:
 		return "참조된 환경변수를 현재 셸에서 export 한 뒤 다시 시도하세요 (값은 Forge 가 저장하지 않습니다)."
 	case ClassProcessExit:
-		return "서버가 시작 직후 종료되었습니다. 위 stderr 내용(필수 환경변수/인자 누락 등)을 확인하세요."
+		return "서버가 시작 직후 종료되었습니다. 위 stderr 내용(필수 환경변수/인자 누락 등)을 확인하세요. 서버에 필요한 환경변수는 --env KEY=${KEY} 로 선언하세요 (PATH/HOME/LANG/프록시 등 최소 변수 외의 부모 환경변수는 서버에 전달되지 않습니다). 값에 ://user:pw@ 자격 증명이 든 프록시/레지스트리 변수(HTTPS_PROXY 등)도 전달되지 않으므로 필요하면 --env HTTPS_PROXY=${HTTPS_PROXY} 로 선언하세요."
 	}
 	return ""
 }

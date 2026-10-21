@@ -196,3 +196,8 @@ func cutUTF8(s string, n int) string {
 
 // MaskJSON exposes the masking for callers that want to show a payload (tests, history).
 func MaskJSON(raw []byte) (string, error) { return maskPayload(raw) }
+
+// MaskText masks secrets inside free text with the same string rules as stored
+// payloads (known credential shapes, `token=...`/`password: ...` regardless of the
+// value length, `--token X`, URL userinfo) for callers that show text to a human.
+func MaskText(s string) string { return maskString(s) }
