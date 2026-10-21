@@ -201,3 +201,13 @@ func MaskJSON(raw []byte) (string, error) { return maskPayload(raw) }
 // payloads (known credential shapes, `token=...`/`password: ...` regardless of the
 // value length, `--token X`, URL userinfo) for callers that show text to a human.
 func MaskText(s string) string { return maskString(s) }
+
+// MaskInline masks only the inline credential patterns of MaskText (`token=...`,
+// `password: ...`, `--token X`, URL userinfo). Unlike MaskText it never replaces a
+// whole value for looking random, so names and paths that merely contain long
+// identifiers (hash-suffixed gateway names, /var/folders/... temp dirs) stay readable.
+func MaskInline(s string) string {
+	s = inlineSecretRe.ReplaceAllString(s, "${1}"+masked)
+	s = inlineFlagRe.ReplaceAllString(s, "${1}"+masked)
+	return urlUserinfoRe.ReplaceAllString(s, "${1}"+masked+"${2}")
+}

@@ -37,7 +37,7 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 		hookCmd(),
 		stub("profile", "Manage profiles (create|use|list)", "TASK-0012"),
 		stub("sync", "Sync registry to client configs [--target] [--dry-run] [--diff]", "TASK-0010"),
-		stub("history", "Query usage history [--kind] [--since] [--client] [--json]", "TASK-0009"),
+		historyCmd(),
 		doctorCmd(),
 	)
 	return root
