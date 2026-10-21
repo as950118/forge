@@ -1,2 +1,6 @@
 .claude/
 .company-os/
+# build artifacts
+dist/
+/forge
+*.test
