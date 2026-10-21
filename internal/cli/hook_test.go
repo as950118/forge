@@ -1,0 +1,117 @@
+package cli
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/heonjinjeong/forge/internal/ledger"
+)
+
+// hookRun executes the real command tree and returns stdout and stderr separately.
+func hookRun(t *testing.T, stdin string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	cmd := NewRootCmd(BuildInfo{Version: "v", Commit: "c", Date: "d"})
+	var o, e bytes.Buffer
+	cmd.SetOut(&o)
+	cmd.SetErr(&e)
+	cmd.SetIn(strings.NewReader(stdin))
+	cmd.SetArgs(args)
+	err = cmd.Execute()
+	return o.String(), e.String(), err
+}
+
+func TestHookIngestAlwaysSilentSuccess(t *testing.T) {
+	home := forgeHome(t)
+	good := `{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"Skill","tool_use_id":"t1","tool_input":{"skill":"demo"}}`
+
+	cases := map[string]struct {
+		in   string
+		args []string
+	}{
+		"uninitialized home": {good, []string{"hook", "ingest", "--client", "claude-code"}},
+		"bad json":           {"{oops", []string{"hook", "ingest", "--client", "claude-code"}},
+		"empty":              {"", []string{"hook", "ingest", "--client", "claude-code"}},
+		"unknown event":      {`{"hook_event_name":"Stop"}`, []string{"hook", "ingest", "--client", "claude-code"}},
+		"huge":               {`{"x":"` + strings.Repeat("a", 3<<20) + `"}`, []string{"hook", "ingest", "--client", "claude-code"}},
+		"no client":          {good, []string{"hook", "ingest"}},
+		"unknown client":     {good, []string{"hook", "ingest", "--client", "zzz"}},
+		"unknown flag":       {good, []string{"hook", "ingest", "--client", "claude-code", "--bogus", "x"}},
+		"missing flag value": {good, []string{"hook", "ingest", "--client"}},
+		"extra args":         {good, []string{"hook", "ingest", "--client", "claude-code", "extra"}},
+	}
+	run := func(name string) {
+		for n, c := range cases {
+			out, errOut, err := hookRun(t, c.in, c.args...)
+			if err != nil || out != "" || errOut != "" {
+				t.Errorf("%s/%s: err=%v stdout=%q stderr=%q", name, n, err, out, errOut)
+			}
+		}
+	}
+	run("uninit")
+	if _, err := os.Stat(home + "/forge.db"); err == nil {
+		t.Fatal("hook created the database")
+	}
+
+	mustRun(t, "init")
+	run("init")
+
+	// diagnostics only with FORGE_HOOK_DEBUG=1, and still rc 0 / stdout empty
+	t.Setenv("FORGE_HOOK_DEBUG", "1")
+	out, errOut, err := hookRun(t, "{oops", "hook", "ingest", "--client", "claude-code")
+	if err != nil || out != "" || strings.Count(strings.TrimSpace(errOut), "\n") != 0 || errOut == "" {
+		t.Errorf("debug: err=%v out=%q err=%q", err, out, errOut)
+	}
+	t.Setenv("FORGE_HOOK_DEBUG", "")
+
+	// success path writes the row silently
+	out, errOut, err = hookRun(t, good, "hook", "ingest", "--client", "claude-code")
+	if err != nil || out != "" || errOut != "" {
+		t.Fatalf("%v %q %q", err, out, errOut)
+	}
+	_, conn, _ := openRegistry(t.Context())
+	defer conn.Close()
+	var n int
+	_ = conn.QueryRow(`SELECT count(*) FROM ledger WHERE kind='skill' AND name='demo' AND source='hook'`).Scan(&n)
+	if n != 1 {
+		t.Errorf("rows=%d", n)
+	}
+}
+
+func TestHookSnippetCmd(t *testing.T) {
+	forgeHome(t)
+	out := mustRun(t, "hook", "snippet", "--client", "claude-code", "--bin", "/usr/local/bin/forge")
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "/usr/local/bin/forge hook ingest --client claude-code --event pre") {
+		t.Errorf("%s", out)
+	}
+	if _, err := runErr(t, "", "hook", "snippet", "--client", "opencode"); err == nil {
+		t.Error("opencode snippet should be unsupported")
+	}
+	if _, err := os.Stat(os.Getenv("FORGE_HOME") + "/forge.db"); err == nil {
+		t.Error("snippet must not touch the registry")
+	}
+}
+
+func TestHookIngestRecoversPanic(t *testing.T) {
+	forgeHome(t)
+	old := ingestHook
+	t.Cleanup(func() { ingestHook = old })
+	ingestHook = func(io.Reader, ledger.HookOptions) error { panic("boom") }
+	args := []string{"hook", "ingest", "--client", "claude-code"}
+	out, errOut, err := hookRun(t, "{}", args...)
+	if err != nil || out != "" || errOut != "" {
+		t.Errorf("err=%v stdout=%q stderr=%q", err, out, errOut)
+	}
+	t.Setenv("FORGE_HOOK_DEBUG", "1")
+	out, errOut, err = hookRun(t, "{}", args...)
+	if err != nil || out != "" || !strings.Contains(errOut, "panic") {
+		t.Errorf("debug: err=%v stdout=%q stderr=%q", err, out, errOut)
+	}
+}
