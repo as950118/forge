@@ -32,7 +32,7 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 	root.AddCommand(
 		initCmd(),
 		skillCmd(),
-		stub("mcp", "Manage MCP servers (add|list|show|remove|refresh|enable|disable|serve)", "TASK-0005"),
+		mcpCmd(),
 		stub("tool", "Manage custom tools (add|list|show|remove|enable|disable|test)", "TASK-0006"),
 		stub("profile", "Manage profiles (create|use|list)", "TASK-0012"),
 		stub("sync", "Sync registry to client configs [--target] [--dry-run] [--diff]", "TASK-0010"),

@@ -36,11 +36,14 @@ func TestVersion(t *testing.T) {
 }
 
 func TestStubs(t *testing.T) {
-	for _, n := range []string{"mcp", "tool", "profile", "sync", "history"} {
+	for _, n := range []string{"tool", "profile", "sync", "history"} {
 		out := run(t, n)
 		if !strings.Contains(out, "not implemented yet (TASK-") {
 			t.Errorf("%s: unexpected output %q", n, out)
 		}
+	}
+	if out := run(t, "mcp", "serve"); !strings.Contains(out, "not implemented yet (TASK-0007)") {
+		t.Errorf("mcp serve: %q", out)
 	}
 	if out := run(t, "skill", "misses"); !strings.Contains(out, "not implemented yet (TASK-0009)") {
 		t.Errorf("skill misses: %q", out)
