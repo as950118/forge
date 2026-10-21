@@ -125,3 +125,4 @@ M0 → M1 → M2 → M3 → M4 순으로 진행하고, M5는 M1~M2 와 병행 �
 - 인덱스: `.company-os/tasks/README.md` 표
 - 워크플로: `create-feature` (PM → Architect → Backend → Reviewer → QA → Release), 상태: Backlog → Ready → In Progress → In Review → QA → Done
 - 초기 백로그는 마일스톤별로 TASK-0001 ~ 에 등록되어 있다.
+- 작업 방식(서브 에이전트 Worker/Verifier 분리, 메인은 결과 보고)은 [`CLAUDE.md`](../CLAUDE.md)의 그라운드 룰을 따른다.
