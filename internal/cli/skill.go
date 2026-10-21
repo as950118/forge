@@ -34,21 +34,9 @@ func skillCmd() *cobra.Command {
 	cmd.AddCommand(
 		skillAddCmd(), skillListCmd(), skillShowCmd(), skillRemoveCmd(),
 		skillToggleCmd("enable", true), skillToggleCmd("disable", false),
-		skillValidateCmd(), skillMissesStub(),
+		skillValidateCmd(), skillMissesCmd(),
 	)
 	return cmd
-}
-
-func skillMissesStub() *cobra.Command {
-	return &cobra.Command{
-		Use:                "misses",
-		Short:              "Show wanted-but-missing skills (not implemented yet)",
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			fmt.Fprintln(cmd.OutOrStdout(), "forge skill misses: not implemented yet (TASK-0009)")
-			return nil
-		},
-	}
 }
 
 func writeJSON(w io.Writer, v any) error {
