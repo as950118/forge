@@ -55,6 +55,20 @@ func EnsureLayout(home string) error {
 // DBPath returns the database file path under home.
 func DBPath(home string) string { return filepath.Join(home, "forge.db") }
 
+// CheckReadable opens an existing database file read-only and runs one query
+// against it. It creates and changes nothing (no directories, no -wal/-shm
+// files, no migrations), so callers can refuse a corrupt or unreadable database
+// before any other side effect.
+func CheckReadable(ctx context.Context, path string) error {
+	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	var n int
+	return conn.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master`).Scan(&n)
+}
+
 // Open opens (creating if needed) the database file, enabling foreign keys on
 // every connection, and applies pending embedded migrations.
 func Open(ctx context.Context, path string) (*sql.DB, error) {

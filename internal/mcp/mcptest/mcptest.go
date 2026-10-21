@@ -4,10 +4,12 @@ package mcptest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,16 +68,64 @@ func MaybeRunStdio() {
 	os.Exit(0)
 }
 
-// NewServer builds a mock MCP server exposing the given tools.
+// NewServer builds a mock MCP server exposing the given tools. Most tools
+// answer "ok". Special names (used by gateway tests) behave differently:
+//
+//	echo : returns the "q" argument
+//	fail : returns an isError result
+//	slow : sleeps for the "ms" argument (default 5000) before answering
+//	big  : returns ~1 MiB of text
+//	pid  : returns the server process id
+//	die  : exits the process (stdio mocks only!)
+//	leak : answers with the value of the env var named by $MOCK_LEAK_ENV and
+//	       writes it to stderr as well (secret masking tests)
 func NewServer(tools []string, desc string) *sdk.Server {
 	s := sdk.NewServer(&sdk.Implementation{Name: "mock-mcp", Version: "1.2.3"}, nil)
 	for _, n := range tools {
+		name := n
 		s.AddTool(&sdk.Tool{
-			Name:        n,
+			Name:        name,
 			Description: desc,
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}},
-		}, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-			return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: "ok"}}}, nil
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{
+				"q":  map[string]any{"type": "string"},
+				"ms": map[string]any{"type": "integer"},
+			}, "additionalProperties": false},
+		}, func(ctx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
+			var args struct {
+				Q  string `json:"q"`
+				MS int    `json:"ms"`
+			}
+			_ = json.Unmarshal(req.Params.Arguments, &args)
+			text := func(t string) (*sdk.CallToolResult, error) {
+				return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: t}}}, nil
+			}
+			switch name {
+			case "echo":
+				return text(args.Q)
+			case "fail":
+				return &sdk.CallToolResult{IsError: true, Content: []sdk.Content{&sdk.TextContent{Text: "mock failure"}}}, nil
+			case "slow":
+				d := time.Duration(args.MS) * time.Millisecond
+				if d == 0 {
+					d = 5 * time.Second
+				}
+				select {
+				case <-time.After(d):
+				case <-ctx.Done():
+				}
+				return text("slow done")
+			case "big":
+				return text(strings.Repeat("0123456789abcdef", 64<<10))
+			case "pid":
+				return text(strconv.Itoa(os.Getpid()))
+			case "die":
+				os.Exit(9)
+			case "leak":
+				v := os.Getenv(os.Getenv("MOCK_LEAK_ENV"))
+				fmt.Fprintln(os.Stderr, "leaking "+v)
+				return text("value=" + v)
+			}
+			return text("ok")
 		})
 	}
 	return s

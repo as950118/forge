@@ -160,3 +160,67 @@ func TestMCPRefreshVerboseShowsRawDetail(t *testing.T) {
 		t.Errorf("err=%v out=%s", err, out)
 	}
 }
+
+func TestMCPServeRecursionGuardAndHelp(t *testing.T) {
+	forgeHome(t)
+	t.Setenv("FORGE_GATEWAY", "1")
+	if _, err := runErr(t, "", "mcp", "serve"); err == nil || !strings.Contains(err.Error(), "재귀") {
+		t.Errorf("recursion guard: %v", err)
+	}
+	if out := mustRun(t, "mcp", "serve", "--help"); !strings.Contains(out, "--client") || !strings.Contains(out, "docs/gateway.md") {
+		t.Errorf("help: %s", out)
+	}
+	t.Setenv("FORGE_GATEWAY", "")
+	mustRun(t, "init")
+	if _, err := runErr(t, "", "mcp", "serve", "--client", "zzz"); err == nil {
+		t.Error("unknown --client")
+	}
+}
+
+func TestMCPServeDoesNotBootstrapHome(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "fresh-home")
+	t.Setenv("FORGE_HOME", home)
+	t.Setenv("FORGE_GATEWAY", "")
+	_, err := runErr(t, "", "mcp", "serve")
+	if err == nil || !strings.Contains(err.Error(), "forge init 을 먼저 실행하세요") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, st := os.Stat(home); !os.IsNotExist(st) {
+		t.Errorf("serve created the home directory: %v", st)
+	}
+	// An existing but uninitialised directory gets no database either.
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runErr(t, "", "mcp", "serve"); err == nil {
+		t.Fatal("expected error")
+	}
+	if ents, _ := os.ReadDir(home); len(ents) != 0 {
+		t.Errorf("serve wrote into the home: %v", ents)
+	}
+}
+
+func TestMCPServeCorruptDBCreatesNothing(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "h")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FORGE_HOME", home)
+	t.Setenv("FORGE_GATEWAY", "")
+	if err := os.WriteFile(filepath.Join(home, "forge.db"), []byte("this is definitely not a sqlite database file........................................"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runErr(t, "", "mcp", "serve")
+	if err == nil || !strings.Contains(err.Error(), "forge.db 를 열 수 없습니다(손상?)") || !strings.Contains(err.Error(), "forge doctor") {
+		t.Fatalf("err = %v", err)
+	}
+	ents, _ := os.ReadDir(home)
+	if len(ents) != 1 || ents[0].Name() != "forge.db" {
+		var names []string
+		for _, e := range ents {
+			names = append(names, e.Name())
+		}
+		t.Errorf("serve created files next to a corrupt database: %v", names)
+	}
+}

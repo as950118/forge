@@ -103,8 +103,14 @@ func (c *cmdStdin) Close() error {
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		killGroup(c.cmd)
-		<-done
+		// stdin EOF did not end it: SIGTERM the whole group, then SIGKILL.
+		termGroup(c.cmd)
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			killGroup(c.cmd)
+			<-done
+		}
 	}
 	return err
 }

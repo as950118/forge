@@ -42,9 +42,6 @@ func TestStubs(t *testing.T) {
 			t.Errorf("%s: unexpected output %q", n, out)
 		}
 	}
-	if out := run(t, "mcp", "serve"); !strings.Contains(out, "not implemented yet (TASK-0007)") {
-		t.Errorf("mcp serve: %q", out)
-	}
 	if out := run(t, "skill", "misses"); !strings.Contains(out, "not implemented yet (TASK-0009)") {
 		t.Errorf("skill misses: %q", out)
 	}
