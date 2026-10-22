@@ -1,0 +1,40 @@
+{
+    "mcpServers": {
+        "github": {
+            "type": "http",
+            "url": "https://api.githubcopilot.com/mcp/",
+            "headers": {
+                "Authorization": "Bearer ${GITHUB_TOKEN}"
+            }
+        },
+        "local-db": {"type": "stdio", "command": "npx", "args": ["-y", "db-server"]},
+        "forge": {
+            "type": "stdio",
+            "command": "forge",
+            "args": [
+                "mcp",
+                "serve",
+                "--client",
+                "claude-code"
+            ]
+        },
+        "fs-direct": {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "fs-server"
+            ],
+            "env": {
+                "API_TOKEN": "${FS_TOKEN}"
+            }
+        },
+        "remote-direct": {
+            "type": "http",
+            "url": "https://example.com/mcp",
+            "headers": {
+                "Authorization": "${REMOTE_AUTH}"
+            }
+        }
+    }
+}

@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "target": "claude-code",
+  "scope": "project",
+  "items": [
+    {
+      "kind": "hook",
+      "name": "PostToolUse :: Skill|mcp__.* :: forge hook ingest --client claude-code --event post",
+      "hash": "f22d623f967b8206743a84c45febdbd54cabf971835fdd06ddf8e16228dd81ab",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
+      "kind": "hook",
+      "name": "PostToolUseFailure :: Skill|mcp__.* :: forge hook ingest --client claude-code --event post",
+      "hash": "f22d623f967b8206743a84c45febdbd54cabf971835fdd06ddf8e16228dd81ab",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
+      "kind": "hook",
+      "name": "PreToolUse :: Skill|mcp__.* :: forge hook ingest --client claude-code --event pre",
+      "hash": "da35721439de586aecbdca37c5157ac35f2196142cd8fa0763fef28f5926bfb9",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
+      "kind": "mcp",
+      "name": "forge",
+      "hash": "6ad4169773e48a4602878e625356c9cac78e27d8808a313ce3918108f1b36e6f",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
+      "kind": "mcp",
+      "name": "fs-direct",
+      "hash": "6ba936ffe650122d7abb006bb7205f8245613eaba2395eb80e3d0501a3cfa555",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
+      "kind": "mcp",
+      "name": "remote-direct",
+      "hash": "a6a5359eb3cb6afb4a30ccbb214919a449d2e52075bd782d6459fdb9ac2015a1",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
+      "kind": "skill",
+      "name": "demo-skill",
+      "hash": "5d33bd6cb195532e6b5f52d97de8175ea49c182ec5837c7264ba520269d0e02a",
+      "applied_at": "2026-10-22T00:00:00Z"
+    }
+  ]
+}

@@ -36,7 +36,7 @@ func TestVersion(t *testing.T) {
 }
 
 func TestStubs(t *testing.T) {
-	for _, n := range []string{"profile", "sync"} {
+	for _, n := range []string{"profile"} { // sync is implemented (sync_test.go)
 		out := run(t, n)
 		if !strings.Contains(out, "not implemented yet (TASK-") {
 			t.Errorf("%s: unexpected output %q", n, out)

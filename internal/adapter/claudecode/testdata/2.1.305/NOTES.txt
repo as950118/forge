@@ -1,0 +1,19 @@
+Claude Code 2.1.305 fixtures (docs/clients/claude-code.md, checked 2026-10-21).
+
+project_before/            a project that already has user-written configuration.
+                           "dot-claude" is installed as ".claude" and "dot-mcp.json" as
+                           ".mcp.json" by the test (a ".claude/" directory would be
+                           ignored by this repository's .gitignore).
+  dot-mcp.json             4-space indent; two user MCP servers (one with a header that
+                           must be masked in diffs)
+  dot-claude/settings.json 2-space indent; permissions, env (with a FAKE key that must be
+                           masked in diffs), a user Notification hook, a user hook in the
+                           same matcher group Forge uses, an unrelated Bash hook, "model"
+  dot-claude/skills/user-skill/SKILL.md   a user-owned skill
+golden/                    expected results (UPDATE_GOLDEN=1 go test ./internal/adapter/claudecode regenerates):
+  plan1.txt                plan + diff of the first sync (paths shown as <PROJ>)
+  mcp1.json settings1.json state1.json skills1.txt     files after the first apply
+  mcp2.json settings2.json state2.json skills2.txt     after registry changes + second apply
+
+Format status of the items used: see the comment above fixtureVersion in env_test.go
+([doc] / [local] / [미확인]).

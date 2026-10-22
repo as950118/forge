@@ -1,0 +1,59 @@
+{
+  "permissions": {
+    "allow": ["Bash(git status)", "Read(./docs/**)"],
+    "deny": ["Read(./.env)"]
+  },
+  "env": {
+    "ANTHROPIC_API_KEY": "sk-test-FAKEFAKEFAKEFAKE0000"
+  },
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [{"type": "command", "command": "cat | jq -r '.message'"}]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "./scripts/audit.sh"}]
+      },
+      {
+        "matcher": "Skill|mcp__.*",
+        "hooks": [
+          {"type": "command", "command": "./scripts/my-skill-audit.sh", "timeout": 10},
+          {
+            "type": "command",
+            "command": "forge hook ingest --client claude-code --event pre",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Skill|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "forge hook ingest --client claude-code --event post",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Skill|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "forge hook ingest --client claude-code --event post",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "model": "sonnet"
+}
