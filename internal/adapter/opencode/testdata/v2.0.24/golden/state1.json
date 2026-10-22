@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "target": "opencode",
+  "scope": "project",
+  "items": [
+    {
+      "kind": "mcp",
+      "name": "forge",
+      "hash": "6fc3510f24ce87e7f597142a2dca09e88dd828deaa831e45b71584ec7280ecd4",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
+      "kind": "mcp",
+      "name": "fs-direct",
+      "hash": "c172f408f8994f29a7fb731fb5ad656a2f35ec80be5aca4edae60e41be620a1d",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
+      "kind": "mcp",
+      "name": "remote-direct",
+      "hash": "e37abda9cf940d6ead69105cc40e3a5f87c98de59317c7ae9d70ddc2adca7679",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
+      "kind": "skill",
+      "name": "demo-skill",
+      "hash": "5d33bd6cb195532e6b5f52d97de8175ea49c182ec5837c7264ba520269d0e02a",
+      "applied_at": "2026-10-22T00:00:00Z"
+    }
+  ]
+}

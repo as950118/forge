@@ -293,7 +293,7 @@ func diffLines(a, b []string) []diffOp {
 var (
 	kvLineRe  = regexp.MustCompile(`^(\s*"((?:[^"\\]|\\.)*)"\s*:\s*)"((?:[^"\\]|\\.)*)"(.*)$`)
 	strLitRe  = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"`)
-	wholeRef  = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}$`)
+	wholeRef  = regexp.MustCompile(`^(?:\$\{[A-Za-z_][A-Za-z0-9_]*\}|\{env:[A-Za-z_][A-Za-z0-9_]*\})$`)
 	hashRe    = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	flagKeyRe = regexp.MustCompile(`(?i)^--?[a-z0-9-]*(token|secret|passw|api-?key|auth|cookie|credential|bearer)[a-z0-9-]*$`)
 )
@@ -316,6 +316,7 @@ func MaskJSONDisplay(src string) string {
 		expectKey bool
 		key       string // object: the key of the current member; array: the key it inherits
 		maskNext  bool   // array: the next string follows a secret-taking flag
+		secret    bool   // the whole container lies below a secret-looking key: every string/number in it is masked
 	}
 	stack := []*frame{{}}
 	var out strings.Builder
@@ -346,7 +347,7 @@ func MaskJSONDisplay(src string) string {
 				switch {
 				case top.maskNext:
 					mask, top.maskNext = true, false
-				case top.key != "" && mcp.LooksSecret(top.key):
+				case top.secret || (top.key != "" && mcp.LooksSecret(top.key)):
 					mask = true
 				}
 				if !top.obj && !mask {
@@ -365,10 +366,23 @@ func MaskJSONDisplay(src string) string {
 			i = j + 1
 			continue
 		case '{':
-			stack = append(stack, &frame{obj: true, expectKey: true})
+			top := stack[len(stack)-1]
+			stack = append(stack, &frame{obj: true, expectKey: true, secret: top.secret || (top.key != "" && mcp.LooksSecret(top.key))})
 		case '[':
 			top := stack[len(stack)-1]
-			stack = append(stack, &frame{key: top.key})
+			stack = append(stack, &frame{key: top.key, secret: top.secret || (top.key != "" && mcp.LooksSecret(top.key))})
+		case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			// A number inside a secret subtree (a PIN, a code) is masked as well. The
+			// token is replaced by a string literal: display only, one line stays one line.
+			if top := stack[len(stack)-1]; top.secret && !(top.obj && top.expectKey) {
+				j := i + 1
+				for j < n && strings.IndexByte("0123456789+-.eE", src[j]) >= 0 {
+					j++
+				}
+				out.WriteString(`"` + maskedValue + `"`)
+				i = j
+				continue
+			}
 		case '}', ']':
 			if len(stack) > 1 {
 				stack = stack[:len(stack)-1]

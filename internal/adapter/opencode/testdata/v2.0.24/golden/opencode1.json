@@ -1,0 +1,63 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "provider": {
+        "anthropic": {
+            "options": {
+                "apiKey": "{env:ANTHROPIC_API_KEY}"
+            }
+        },
+        "example": {
+            "options": {
+                "apiKey": "FIXTURE-not-a-real-key-0001",
+                "baseURL": "https://llm.example.com/v1"
+            }
+        }
+    },
+    "permission": {
+        "skill": {
+            "*": "allow"
+        }
+    },
+    "mcp": {
+        "user-remote": {
+            "type": "remote",
+            "url": "https://api.example.com/mcp",
+            "headers": {
+                "Authorization": "Bearer {env:EXAMPLE_TOKEN}"
+            },
+            "enabled": true
+        },
+        "user-local": {"type": "local", "command": ["node", "server.js"], "enabled": true},
+        "forge": {
+            "type": "local",
+            "command": [
+                "forge",
+                "mcp",
+                "serve",
+                "--client",
+                "opencode"
+            ],
+            "enabled": true
+        },
+        "fs-direct": {
+            "type": "local",
+            "command": [
+                "npx",
+                "-y",
+                "fs-server"
+            ],
+            "environment": {
+                "API_TOKEN": "{env:FS_TOKEN}"
+            },
+            "enabled": true
+        },
+        "remote-direct": {
+            "type": "remote",
+            "url": "https://example.com/mcp",
+            "headers": {
+                "Authorization": "{env:REMOTE_AUTH}"
+            },
+            "enabled": true
+        }
+    }
+}

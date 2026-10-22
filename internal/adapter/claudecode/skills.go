@@ -112,6 +112,14 @@ func (pl *planner) planSkill(s adapter.SkillInput) {
 		conflict(r, false)
 		return
 	}
+	if gerr := adapter.GuardPath(target); gerr != nil {
+		conflict("보안 정책: 대상 경로가 비밀 파일과 같은 파일이라 쓰지 않습니다 ("+adapter.MaskLine(gerr.Error())+")", false)
+		return
+	}
+	if gerr := adapter.GuardPath(s.StoreDir); gerr != nil {
+		conflict("보안 정책으로 레지스트리 스냅샷 경로를 읽을 수 없습니다: "+adapter.MaskLine(gerr.Error()), false)
+		return
+	}
 	wantHash, _, err := adapter.TreeHash(s.StoreDir, false)
 	if err != nil || (s.Hash != "" && wantHash != s.Hash) {
 		conflict("레지스트리 스냅샷을 검증할 수 없습니다 (손상 또는 변조: 내용 해시가 등록 값과 다름)", false)

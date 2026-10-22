@@ -1,7 +1,7 @@
 // Package adapter holds the client-independent part of `forge sync`: the
 // Adapter interface, the plan/result model and the apply engine (backup,
 // verification, atomic writes, rollback, locking, restore). Client adapters
-// (internal/adapter/claudecode, later OpenCode) only decide WHAT to change by
+// (internal/adapter/claudecode, internal/adapter/opencode) only decide WHAT to change by
 // producing a Plan; every write goes through Apply, so the safety rules hold
 // for all of them:
 //
@@ -11,7 +11,7 @@
 //     back from the backup when a step fails.
 //   - User-owned content is never part of a Plan: adapters mark such items as
 //     conflicts and leave their files out of the operations.
-//   - The Claude Code user-level state file in the home directory is unreachable (see guard.go).
+//   - Secret/user-level client files (the Claude Code user file, OpenCode secrets) are unreachable (see guard.go).
 package adapter
 
 import (

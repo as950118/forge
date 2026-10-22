@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "target": "opencode",
+  "scope": "project",
+  "items": [
+    {
+      "kind": "mcp",
+      "name": "forge",
+      "hash": "6fc3510f24ce87e7f597142a2dca09e88dd828deaa831e45b71584ec7280ecd4",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
+      "kind": "mcp",
+      "name": "late-add",
+      "hash": "990f014a546e8e70fbbc2eccb7db804bec79546679450a01c7ff5d195a00e0bf",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
+      "kind": "skill",
+      "name": "demo-skill",
+      "hash": "f2ca07e15e8ab0ef91a62f4dfa157e9a7b1a337925be7e7fe7a38f93344e84da",
+      "applied_at": "2026-10-22T00:00:00Z"
+    }
+  ]
+}

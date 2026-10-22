@@ -80,7 +80,8 @@ func TestSyncFlagValidation(t *testing.T) {
 	cases := map[string][]string{
 		"apply+dry-run":      {"--target", "claude-code", "--apply", "--dry-run"},
 		"no target":          {},
-		"opencode":           {"--target", "opencode"},
+		"opencode no hooks":  {"--target", "opencode", "--no-hooks"},
+		"opencode rm hooks":  {"--target", "opencode", "--remove-hooks"},
 		"unknown target":     {"--target", "nope"},
 		"bad scope":          {"--target", "claude-code", "--scope", "global"},
 		"restore+list":       {"--restore", "latest", "--list-backups"},
