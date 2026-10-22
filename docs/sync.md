@@ -1,8 +1,9 @@
 # `forge sync` — 레지스트리를 클라이언트 설정으로 렌더링 (TASK-0010)
 
 `forge sync` 는 Forge 레지스트리(스킬·MCP 서버·호출 원장 hook)를 클라이언트 설정 파일로 내보낸다.
-지금은 Claude Code(`--target claude-code`)만 구현되어 있다. OpenCode 는 TASK-0011 이 같은 공통 계층
-(`internal/adapter`)을 재사용해 추가한다.
+Claude Code(`--target claude-code`)와 OpenCode(`--target opencode`, 이 문서의 "OpenCode" 절)를 지원한다.
+두 타깃은 같은 공통 계층(`internal/adapter`)을 쓰며 인터페이스는 `docs/adapter.md` 에 있다. 아래 설명은 별도 표시가 없으면 두 타깃에 공통이고,
+`.mcp.json`·`settings.json`·hook 이야기는 claude-code, `opencode.json` 이야기는 opencode 에 해당한다.
 
 > 이 기능은 **사용자의 실제 설정 파일을 쓴다.** 그래서 기본 동작은 계획(plan) 출력뿐이고, 파일은 `--apply` 를 명시했을 때만 쓴다.
 
@@ -30,14 +31,14 @@ forge sync --prune-backups [--keep 20] [--dry-run]       # 오래된 백업 삭�
 
 | 플래그 | 의미 |
 |--------|------|
-| `--target claude-code` | 대상 클라이언트 (필수; `opencode` 는 아직 미지원) |
+| `--target claude-code\|opencode` | 대상 클라이언트 (필수). 다른 값은 지원 목록과 함께 오류 |
 | `--scope project\|user` | 기본 `project`. 아래 "스코프별 대상" 참고 |
 | `--project-dir <경로>` | 프로젝트 스코프의 시작 디렉터리(기본 현재 디렉터리). `.git` 이 있는 상위 디렉터리를 저장소 루트로 쓴다. `.git` 이 없으면 지정한 디렉터리를 쓰고 계획에 참고를 남긴다. **홈 디렉터리, Forge 홈(`$FORGE_HOME`), `~/.claude` 자체는 프로젝트 루트로 쓸 수 없다** (아래 "금지 루트") |
 | `--dry-run` / `--apply` | 동시 지정은 오류. 둘 다 없으면 계획만 출력 |
 | `--diff` | 계획에 파일별 통합 diff 추가 |
 | `--bin <이름\|절대경로>` | 설정 파일에 기록할 forge 명령 (기본 `forge`). 상대 경로(`./forge`)는 거부 |
-| `--no-hooks` | hook 을 **설치·갱신하지 않는다. 이미 설치된 관리 hook 은 건드리지 않는다**(제거하지 않음, `settings.json` 도 열지 않음). 계획에 참고가 한 줄 남는다 |
-| `--remove-hooks` | 이미 설치된 **관리 hook 만 제거**한다(handler 단위, 계획에 `삭제` 로 보임; 사용자 hook 은 그대로). `--no-hooks` 와 동시 지정은 오류 |
+| `--no-hooks` | (claude-code 전용; opencode 에서는 오류) hook 을 **설치·갱신하지 않는다. 이미 설치된 관리 hook 은 건드리지 않는다**(제거하지 않음, `settings.json` 도 열지 않음). 계획에 참고가 한 줄 남는다 |
+| `--remove-hooks` | (claude-code 전용; opencode 에서는 오류) 이미 설치된 **관리 hook 만 제거**한다(handler 단위, 계획에 `삭제` 로 보임; 사용자 hook 은 그대로). `--no-hooks` 와 동시 지정은 오류 |
 | `--skip-conflicts` | 충돌 항목을 제외하고 적용 |
 | `--force-managed` | "Forge 가 관리하지만 사람이 수정한" 항목을 덮어쓴다. 사용자 소유 항목에는 효과가 없다 |
 | `--restore`, `--force` | 복원. `--force` 는 백업 이후 사용자가 수정한 파일이 있어도 복원 |
@@ -46,6 +47,8 @@ forge sync --prune-backups [--keep 20] [--dry-run]       # 오래된 백업 삭�
 (이 경우 아무것도 쓰지 않는다), 오류(파싱 불가 JSON 등) 비0.
 
 ## 스코프별 대상
+
+(claude-code. opencode 는 아래 "OpenCode" 절의 표)
 
 | 항목 | `--scope project` (기본) | `--scope user` |
 |------|--------------------------|----------------|
@@ -60,6 +63,77 @@ forge sync --prune-backups [--keep 20] [--dry-run]       # 오래된 백업 삭�
 - **스킬**: 레지스트리에서 활성(enabled)인 스킬의 현재 버전(`~/.forge/skills/<name>@<ver>/`)의 파일 트리를 복사한다. 파일 0644(실행 비트 있으면 0755), 디렉터리 0755 — 읽기 전용 스냅샷 모드는 물려받지 않는다. 심볼릭 링크가 있거나 내용 해시가 등록값과 다르면(변조) 복사하지 않고 충돌로 보고한다. 디렉터리 안에 관리 마커 `.forge-managed`(name, version, tree_hash)를 둔다. SKILL.md 에는 아무것도 추가하지 않는다.
 - **MCP(project)**: `.mcp.json` 에 (a) 게이트웨이 항목 `forge`(`type: stdio`, `command` = `--bin`, `args` = `mcp serve --client claude-code`)와 (b) exposure=`direct` 인 활성 서버를 쓴다. `type` 은 항상 명시한다(Claude Code 는 `type` 없는 `url` 항목을 stdio 로 보아 설정 오류로 건너뜀). 값은 `${VAR}` 참조 그대로이며, 렌더 직전에 레지스트리 검증(`mcp.Spec.Validate`)을 다시 거쳐 리터럴 비밀이 있으면 렌더를 거부한다. `exposure=gateway` 서버는 게이트웨이가 프록시하므로 쓰지 않고, `hidden` 은 쓰지 않는다. `cwd` 가 있는 서버와 keychain 참조 서버는 `.mcp.json` 형식으로 표현할 수 없어 건너뛴다(`gateway` 사용). `timeout_ms` 는 Claude Code 쪽 단위가 미확인이라 렌더하지 않는다.
 - **hook**: `ledger.ClaudeCodeSnippet` 과 같은 내용(`PreToolUse`/`PostToolUse`/`PostToolUseFailure`, matcher `Skill|mcp__.*`, `forge hook ingest ...`)을 `hooks` 에 **handler 단위로** 병합한다. 같은 matcher 그룹에 사용자가 넣은 handler 가 있으면 그 그룹은 그대로 두고 Forge handler 만 뒤에 추가한다. 제거도 handler 단위(우리가 만든 빈 그룹/이벤트/`hooks` 만 정리).
+
+## OpenCode (`--target opencode`, TASK-0011)
+
+```bash
+forge sync --target opencode --dry-run --diff      # 계획 (아무것도 쓰지 않음)
+forge sync --target opencode --apply               # 쓰기 (백업 후)
+forge sync --target opencode --scope user          # 스킬은 ~/.config/opencode/skills, MCP 는 명령만 출력
+```
+
+`--scope`, `--project-dir`, `--dry-run`, `--diff`, `--apply`, `--skip-conflicts`, `--force-managed`, `--json`, `--bin`, `--restore`, `--list-backups`, `--prune-backups` 는 claude-code 와 같이 동작한다.
+`--no-hooks`/`--remove-hooks` 는 지원하지 않는다(오류): OpenCode 의 hook/플러그인 수집은 이번 범위에 없다. **Forge 는 `opencode` 를 어떤 서브명령으로도 실행하지 않는다.**
+적용 뒤 OpenCode 에 반영하려면 사용자가 직접 `opencode reload` 를 실행한다(계획이 안내만 한다).
+
+### 스코프별 대상
+
+| 항목 | `--scope project` (기본) | `--scope user` |
+|------|--------------------------|----------------|
+| 스킬 | `<repo>/.opencode/skills/<name>/` | `~/.config/opencode/skills/<name>/` |
+| MCP 서버 | `<repo>/opencode.json` 의 최상위 `mcp` | **파일을 쓰지 않음** — 사용자가 실행할 `opencode mcp add <이름> --global ...` 명령을 출력만 한다 |
+| hook | 없음 | 없음 |
+| 상태 파일 | `<repo>/.forge/sync-state.opencode.json` (저널 `.forge/sync-journal.opencode.json`) | `$FORGE_HOME/sync-state/opencode-user.json` (저널 `opencode-user.journal.json`) |
+| 백업·잠금 | `$FORGE_HOME/backups/`(manifest 의 `target: opencode`), `locks/opencode-project-<해시>.lock` | 같음 |
+
+claude-code 의 상태 파일 이름(`sync-state.json`, `claude-code-user.json`)은 바뀌지 않았다. 두 타깃은 서로의 상태·저널·백업·잠금을 공유하지 않으며, `--restore` 는 다른 타깃의 백업을 거부한다.
+
+### 무엇이 렌더링되는가
+
+- **스킬**: claude-code 와 같은 마커(`.forge-managed`)·충돌 규칙으로 레지스트리 스킬 트리를 복사한다. `--skills-dir` 같은 경로 선택 옵션은 두지 않았다: `.claude/skills` 에 쓰면 claude-code 타깃과 소유권(상태 파일)이 둘로 갈라지고, 아래 중복 방지로 이미 같은 목적을 달성하며, 옵션이 늘면 안전 검증 표면만 커진다.
+- **MCP(project)**: `opencode.json` 의 `mcp` 에 (a) 게이트웨이 `forge` = `{"type":"local","command":["<bin>","mcp","serve","--client","opencode"],"enabled":true}` 와 (b) exposure=`direct` 인 서버를 쓴다(노출 설정 키 `mcp.exposure.<서버>.opencode`).
+
+  | 레지스트리(Spec) | opencode.json |
+  |------------------|---------------|
+  | stdio, command + args | `{"type":"local","command":[command, ...args],"enabled":true}` (공백·따옴표·메타문자가 있어도 JSON 문자열이라 안전) |
+  | stdio env `K=${V}` | `"environment":{"K":"{env:V}"}` |
+  | http / sse, url | `{"type":"remote","url":"…","enabled":true}` (둘 다 remote) |
+  | header `Authorization=${V}` | `"headers":{"Authorization":"{env:V}"}` |
+  | cwd 있는 서버 / keychain 참조 | 건너뜀 (`gateway` 사용) |
+  | `timeout_ms` | 렌더하지 않음 (단위 [미확인], 계획에 참고) |
+
+  렌더 직전 `mcp.Spec.Validate` 를 다시 거치고, 비밀로 보이는 literal 은 거부한다. OpenCode 는 설정 텍스트의 `{env:NAME}`/`{file:경로}` 를 치환하므로([bin]) **명령·인자·URL·literal 값에 `{env:`, `{file:`, `${` 가 들어 있으면 렌더를 거부(충돌)** 한다(Forge 가 직접 쓰는 `{env:NAME}` 참조만 허용). 환경변수·헤더 **이름**도 참조/literal 구분 없이 렌더 직전에 검사한다(`adapter.CheckValueKey`: env 는 `^[A-Za-z_][A-Za-z0-9_]*$`, 헤더는 HTTP token, 치환 문법·제어 문자·공백·`"`·`\`·비ASCII·128자 초과 거부; claude-code 도 같음). DB 를 직접 고쳐 악성 이름을 넣어도 충돌로 거부된다. 사용자가 같은 이름을 직접 정의했으면 충돌이다.
+- **user 스코프 MCP 명령**: `opencode mcp add <이름> --global [--env K={env:V}]... -- <command> <args>...`, 원격은 `opencode mcp add <이름> --global --url <URL> [--header K={env:V}]...`. 모든 단어는 POSIX 작은따옴표 이스케이프되며 비밀 값은 출력하지 않고 환경변수 **이름 참조**만 넣는다. 옵션은 [help] 에 기록된 `--url`, `--header k=v`, `--env k=v`, `--global`, `-- cmd args...` 만 쓴다. 옵션 순서와 add 가 `{env:..}` 값을 그대로 저장하는지는 [미확인]이라 이름을 먼저 두고 `--` 를 썼다. `opencode` 에는 `mcp remove` 가 없다. 명령은 실행하지 않는다.
+
+### 스킬 중복 노출 방지
+
+OpenCode 는 `.opencode/skills` 뿐 아니라 `.claude/skills` 도 읽는다([doc]+[bin]). 같은 스킬이 두 경로에 있을 때의 동작은 [미확인]이므로:
+
+- opencode 타깃은 같은 scope 의 **claude-code 상태 파일을 읽기만** 해서(`sync-state.json` / `claude-code-user.json`; 수정·생성 없음) 거기에 기록된 스킬을 **건너뜀**으로 계획한다(이유 ".claude/skills 로 이미 노출됨 — 두 경로 동시 노출 시 동작 [미확인]").
+- opencode 가 이미 `.opencode/skills` 에 쓴 스킬을 나중에 claude-code 가 관리하게 되면, 다음 opencode sync 가 자기 사본을 **관리 항목일 때만**(마커·상태·해시 일치) 백업 후 제거한다. 손으로 고친 사본은 지우지 않고 충돌로 알린다. claude-code 상태 파일을 해석할 수 없으면 검사를 건너뛰고 계획에 알린다.
+- 반대 방향(claude-code 쪽 방지)은 이번에 구현하지 않았다: opencode → claude-code 순서로 sync 하면 잠시 두 경로에 있다가 opencode 를 한 번 더 sync 하면 수렴한다(권장 순서: claude-code 먼저).
+
+### `opencode.json` / `opencode.jsonc`
+
+- `opencode.json` 만 편집한다(최상위 `mcp` 멤버만; `$schema`, provider, model, permission, tools 등 다른 키는 순서·들여쓰기 포함 바이트 그대로). 엄격한 JSON 이 아니거나 `mcp` 가 객체가 아니면 아무것도 쓰지 않고 중단한다.
+- 프로젝트에 `opencode.jsonc` 만 있고 `opencode.json` 이 없으면 **JSONC 는 아직 지원하지 않습니다(주석 보존 불가)** 로 중단한다(아무것도 쓰지 않음; 스킬도 쓰지 않는다). 둘 다 있으면 `opencode.json` 만 대상으로 하고 "opencode.jsonc 도 존재함: 우선순위 [미확인]" 경고를 계획에 남긴다. `opencode.jsonc` 는 열지 않는다(존재만 확인). `.opencode/opencode.json` 은 대상이 아니다.
+- diff 의 비밀 마스킹은 `apiKey`, `api_key`, `options.apiKey`, `headers.Authorization` 등 키 이름 규칙으로 provider 키를 가린다(`{env:NAME}` 참조는 그대로 보임).
+
+### 읽지도 쓰지도 않는 파일
+
+`adapter.GuardPath` 는 **(디렉터리, 파일 이름) 조합**과 **파일 동일성(`os.SameFile`)** 으로 거부한다. 이름만으로는 거부하지 않는다: 프로젝트의 `credential-helper`, `service`, `auth` 같은 스킬·파일 이름은 정상이다.
+
+- OpenCode **설정 디렉터리**(`~/.config/opencode`, 그리고 `XDG_CONFIG_HOME` 이 절대 경로로 설정되어 있으면 `$XDG_CONFIG_HOME/opencode`) 바로 아래의 `service.json`, `mcp-auth.json`, `auth.json`, `opencode.db`(+`-wal`/`-shm`), `credential*`, 그리고 전역 설정 `opencode.json`, `opencode.jsonc`, `config.json`(provider API 키가 literal 로 들어갈 수 있음). 이름 비교는 대소문자·보이지 않는 문자·끝의 `.`/공백을 무시한다.
+- OpenCode **데이터·상태 디렉터리**(`~/.local/share/opencode`, `~/.local/state/opencode`, `$XDG_DATA_HOME/opencode`, `$XDG_STATE_HOME/opencode`) 아래 전부.
+- **동일성**: 위 파일들(데이터·상태 디렉터리는 바로 아래 모든 파일)과 같은 파일(하드링크·심볼릭 링크, 어떤 이름·위치든)이면 거부한다. 예를 들어 프로젝트의 `opencode.json` 을 `mcp-auth.json` 이나 `auth.json` 에 `ln` 으로 연결해도 읽지 않는다. 판정은 `stat` 만 쓰며 파일을 열지 않는다. 스킬 트리를 해시·복사할 때도 트리 안의 각 파일에 같은 동일성 검사를 한다.
+- **하드링크 정책(일반 방어)**: 어댑터가 읽는 파일(`opencode.json`, `.mcp.json`, `settings.json`, 상태 파일 등)이 **하드링크가 둘 이상**(`st_nlink > 1`)이면 내용을 읽지 않고 "하드링크된 설정 파일은 지원하지 않습니다(다른 파일과 같은 내용을 공유함)" 로 중단한다. plan·apply(적용 직전 재검증)·restore 가 모두 같은 읽기 함수를 거치므로 일관되며 두 타깃 모두에 적용된다. 정당한 하드링크 사용은 드물어 안전 쪽을 택했다. 링크를 지우면(`nlink == 1`) 다시 동작한다.
+- **XDG**: `XDG_CONFIG_HOME` 이 설정되어 있으면 user 스코프 스킬 대상은 `$XDG_CONFIG_HOME/opencode/skills`(미설정·빈 값이면 `~/.config/opencode/skills`)이고 계획의 참고에 실제 대상 경로가 표시된다. OpenCode 가 XDG 를 따르는지는 `docs/clients/opencode.md` 에 근거가 없어 [미확인]이므로 보수적으로 처리한다. 상대 경로, 제어 문자가 든 값, 홈 디렉터리 밖, 심볼릭 링크인 값은 무시하고 기본 경로를 쓰며 계획에 경고를 남긴다. 가드와 금지 루트는 XDG 값이 절대 경로이면 홈 안팎을 가리지 않고 적용한다. (복원은 복원 시점의 환경변수로 허용 경로를 다시 검사하므로, sync 때와 `XDG_CONFIG_HOME` 이 다르면 그 백업의 user 스킬 경로는 거부된다.)
+
+**프로젝트의 `opencode.json` 은 정상 대상이다.** 프로젝트 루트로 쓸 수 없는 디렉터리: 홈, `$FORGE_HOME`, `~/.claude`, `~/.config/opencode`, `~/.local/{share,state}/opencode`, `~/.cache/opencode`, 위의 XDG 설정·데이터·상태 디렉터리. 비밀 파일 이름을 가진 스킬도(예: `credential-helper`) 일반 스킬처럼 추가·갱신·제거된다.
+
+### 형식 근거
+
+픽스처: `internal/adapter/opencode/testdata/v2.0.24/` (`project_before/` 입력, `golden/` 기대값, `NOTES.txt` 에 근거와 `[미확인]`; `UPDATE_GOLDEN=1 go test ./internal/adapter/opencode`). 근거는 `docs/clients/opencode.md` 의 `[doc]`/`[bin]`/`[help]`/`[local]` 항목뿐이다. `[미확인]`(렌더하지 않거나 경고만 함): `cwd`, `timeout` 단위, `oauth`, http/sse 구분, `tools` 글롭, 플러그인, `opencode.json` 과 `opencode.jsonc` 의 우선순위, 한 스킬이 두 경로에 있을 때의 동작, OpenCode 의 `XDG_CONFIG_HOME` 준수 여부(보수적으로 처리), `mcp add` 의 옵션 순서와 값 저장 방식.
 
 ## 안전 설계
 
@@ -137,7 +211,7 @@ forge sync --prune-backups [--keep 20] [--dry-run]       # 오래된 백업 삭�
 
 ## 출력
 
-계획은 항목별로 `추가/변경/삭제/충돌/건너뜀` 과 이유를 표로 보여 준다(`변경 없음` 항목은 요약에만 센다). 모든 동적 문자열(이름, 경로, 이유, 명령)은 `internal/textsafe` 로 정화하고, diff 는 줄 길이·줄 수를 제한한다. diff 의 비밀 마스킹은 **줄이 아니라 JSON 값 단위**다. diff 를 계산하기 전에 표시용 사본에서 키 이름이 TOKEN/SECRET/PASSWORD/KEY/AUTH/COOKIE/CREDENTIAL 등을 포함하는(대소문자·camelCase 무관) 문자열 값, 그런 키 아래 배열의 문자열, `--token` 류 플래그 다음 요소를 토큰 단위로 찾아 `***` 로 바꾼다. 한 줄로 압축된 파일, 여러 줄 파일, 중첩, 배열 안 객체를 똑같이 처리하며, 마스킹은 문자열 리터럴 안만 바꾸므로 줄 수가 변하지 않는다(전후 줄이 1:1 대응). 그 뒤에 줄 단위 값 패턴(알려진 자격 증명 형태, 인라인 `--token X`) 마스킹이 한 번 더 적용된다. 마스킹은 **표시용**일 뿐 쓰는 내용은 바꾸지 않는다. 알려진 한계: 비밀 값만 바뀐 줄은 양쪽이 `***` 가 되어 diff 에 변경으로 보이지 않고(파일은 `쓸 파일` 목록에 나온다), 평범한 형태의 비밀이 비밀스럽지 않은 키 이름 아래 있으면 휴리스틱이 놓칠 수 있다.
+계획은 항목별로 `추가/변경/삭제/충돌/건너뜀` 과 이유를 표로 보여 준다(`변경 없음` 항목은 요약에만 센다). 모든 동적 문자열(이름, 경로, 이유, 명령)은 `internal/textsafe` 로 정화하고, diff 는 줄 길이·줄 수를 제한한다. diff 의 비밀 마스킹은 **줄이 아니라 JSON 값 단위**다. diff 를 계산하기 전에 표시용 사본에서 키 이름이 TOKEN/SECRET/PASSWORD/KEY/AUTH/COOKIE/CREDENTIAL 등을 포함하는(대소문자·camelCase 무관) 문자열 값, **그런 키 아래 하위 트리 전체**(중첩 객체·배열·배열 안 객체)의 문자열과 숫자 값, `--token` 류 플래그 다음 요소를 토큰 단위로 찾아 `***` 로 바꾼다(`credentials`/`secrets`/`auth` 아래 객체의 값도 가려진다. 값 전체가 `${VAR}`/`{env:VAR}` 인 참조는 비밀이 아니므로 그대로 보인다). 한 줄로 압축된 파일, 여러 줄 파일, 중첩, 배열 안 객체를 똑같이 처리하며, 마스킹은 문자열 리터럴 안만 바꾸므로 줄 수가 변하지 않는다(전후 줄이 1:1 대응). 그 뒤에 줄 단위 값 패턴(알려진 자격 증명 형태, 인라인 `--token X`) 마스킹이 한 번 더 적용된다. 마스킹은 **표시용**일 뿐 쓰는 내용은 바꾸지 않는다. 알려진 한계: 비밀 값만 바뀐 줄은 양쪽이 `***` 가 되어 diff 에 변경으로 보이지 않고(파일은 `쓸 파일` 목록에 나온다), 평범한 형태의 비밀이 비밀스럽지 않은 키 이름 아래 있으면 휴리스틱이 놓칠 수 있다.
 
 표의 이름·이유 칸은 표시용으로 각각 80자·120자에서 `…` 로 줄인다(줄였다는 안내가 붙는다). `--json` 은 줄이지 않는다(단 모든 동적 문자열은 300자에서 정화·절단한다).
 
@@ -178,6 +252,7 @@ forge sync --prune-backups [--keep 20] [--dry-run]       # 오래된 백업 삭�
 
 ## 한계
 
+- (opencode) `opencode.jsonc` 는 지원하지 않는다(TASK-0022 후속 후보: 주석 보존 편집기). 중복 노출 방지는 opencode → claude-code 방향만이다. 어댑터 코드가 claudecode 에서 복사되어 있어 세 번째 타깃 전에 공통화가 필요하다(`docs/adapter.md`).
 - 프로젝트 스코프 레지스트리(`skill --project`)가 없어 전역 레지스트리만 내보낸다. 프로필별 노출(TASK-0012)은 아직 없고 MCP 노출은 `mcp expose`/`enable --client` 설정을 쓴다. 스킬·도구의 클라이언트별 노출 설정은 없다(활성이면 모두 내보냄). 사용자 정의 도구(`forge tool`)는 게이트웨이로만 제공되어 별도 렌더링이 없다.
 - user 스코프 MCP 는 파일을 쓰지 않아 상태 추적·자동 제거·되돌리기가 없다(명령 출력만).
 - 사용자가 `.mcp.json` 서버를 직접 정의한 이름과 겹치면 항상 충돌이다(동일 내용이어도 채택하지 않음).

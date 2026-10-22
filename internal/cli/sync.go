@@ -12,16 +12,24 @@ import (
 
 	"github.com/heonjinjeong/forge/internal/adapter"
 	"github.com/heonjinjeong/forge/internal/adapter/claudecode"
+	"github.com/heonjinjeong/forge/internal/adapter/opencode"
 	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/heonjinjeong/forge/internal/textsafe"
 )
 
 // syncLockTimeout is how long --apply / --restore wait for a concurrent sync.
 var syncLockTimeout = 30 * time.Second
 
-// syncAdapters returns the known adapters. TODO(TASK-0011): add OpenCode here.
+// syncAdapters returns the known adapters.
 func syncAdapters(forgeHome string) map[string]adapter.Adapter {
-	return map[string]adapter.Adapter{claudecode.Name: claudecode.New(forgeHome)}
+	return map[string]adapter.Adapter{
+		claudecode.Name: claudecode.New(forgeHome),
+		opencode.Name:   opencode.New(forgeHome),
+	}
 }
+
+// supportedTargets is the list shown in --target errors and help.
+const supportedTargets = "claude-code, opencode"
 
 type syncFlags struct {
 	target, scope, projectDir, bin   string
@@ -50,10 +58,19 @@ content hash still matches.
   forge sync --target claude-code --dry-run --diff      # plan with diffs
   forge sync --target claude-code --apply               # write
   forge sync --target claude-code --apply --no-hooks    # leave hooks alone (no install, update or removal)
-  forge sync --target claude-code --apply --remove-hooks # remove the managed hooks
+  forge sync --target claude-code --apply --remove-hooks # remove the managed hooks (claude-code only)
+  forge sync --target opencode --dry-run --diff         # OpenCode: skills + opencode.json "mcp" (no hooks)
+  forge sync --target opencode --apply
   forge sync --list-backups
   forge sync --restore latest [--dry-run] [--force]
   forge sync --prune-backups [--keep 20] [--dry-run]
+
+Targets: claude-code (skills, .mcp.json, hooks) and opencode (skills in
+.opencode/skills, the "mcp" object of the project's opencode.json; no hooks).
+Each target has its own sidecar state, so syncing both never touches the other's
+items. Skills that claude-code already manages under .claude/skills are not
+written again for opencode (OpenCode reads that directory too). Forge never runs
+claude or opencode; after an opencode apply run "opencode reload" yourself.
 
 If an earlier --apply was killed, the next plan says so and --apply finishes the
 work (and removes leftover temporary files); files you edited meanwhile are kept
@@ -64,16 +81,16 @@ See docs/sync.md.`,
 		RunE: func(cmd *cobra.Command, _ []string) error { return runSync(cmd, f) },
 	}
 	fl := cmd.Flags()
-	fl.StringVar(&f.target, "target", "", "대상 클라이언트: claude-code")
-	fl.StringVar(&f.scope, "scope", "project", "project(기본: <repo>/.claude, .mcp.json) | user(~/.claude/skills, ~/.claude/settings.json; MCP 는 명령만 출력)")
+	fl.StringVar(&f.target, "target", "", "대상 클라이언트: claude-code | opencode")
+	fl.StringVar(&f.scope, "scope", "project", "project(기본: claude-code <repo>/.claude, .mcp.json | opencode <repo>/.opencode/skills, opencode.json) | user(claude-code ~/.claude/skills, settings.json | opencode ~/.config/opencode/skills; MCP 는 명령만 출력)")
 	fl.StringVar(&f.projectDir, "project-dir", "", "프로젝트 디렉터리 (기본: 현재 디렉터리; 저장소 루트를 찾아 사용)")
 	fl.BoolVar(&f.dryRun, "dry-run", false, "계획만 출력하고 아무것도 쓰지 않음 (기본 동작과 동일)")
 	fl.BoolVar(&f.diff, "diff", false, "파일별 통합 diff 표시 (비밀 값은 가림)")
 	fl.BoolVar(&f.apply, "apply", false, "실제로 파일을 씀 (백업 후)")
 	fl.BoolVar(&f.asJSON, "json", false, "JSON 출력")
 	fl.StringVar(&f.bin, "bin", "forge", "설정 파일에 기록할 forge 명령 (이름 또는 절대 경로)")
-	fl.BoolVar(&f.noHooks, "no-hooks", false, "hook 설치/갱신을 건너뜀 (이미 설치된 관리 hook 은 건드리지 않음)")
-	fl.BoolVar(&f.removeHooks, "remove-hooks", false, "이미 설치된 관리 hook 을 제거 (--no-hooks 와 함께 쓸 수 없음)")
+	fl.BoolVar(&f.noHooks, "no-hooks", false, "hook 설치/갱신을 건너뜀 (이미 설치된 관리 hook 은 건드리지 않음; claude-code 전용)")
+	fl.BoolVar(&f.removeHooks, "remove-hooks", false, "이미 설치된 관리 hook 을 제거 (--no-hooks 와 함께 쓸 수 없음; claude-code 전용)")
 	fl.BoolVar(&f.forceManaged, "force-managed", false, "손으로 수정된 관리 항목을 덮어씀 (사용자 항목은 대상 아님, 백업됨)")
 	fl.BoolVar(&f.skipConfl, "skip-conflicts", false, "충돌 항목만 제외하고 나머지를 적용 (기본: 충돌이 있으면 아무것도 쓰지 않음)")
 	fl.BoolVar(&f.listBackups, "list-backups", false, "백업 목록")
@@ -125,14 +142,14 @@ func runSync(cmd *cobra.Command, f syncFlags) error {
 
 func runSyncPlan(cmd *cobra.Command, home string, f syncFlags) error {
 	if f.target == "" {
-		return errors.New("--target 이 필요합니다 (지원: claude-code)")
+		return fmt.Errorf("--target 이 필요합니다 (지원: %s)", supportedTargets)
 	}
 	a, ok := syncAdapters(home)[f.target]
 	if !ok {
-		if f.target == "opencode" {
-			return errors.New("--target opencode 는 아직 지원하지 않습니다 (TASK-0011)")
-		}
-		return fmt.Errorf("알 수 없는 --target: %q (지원: claude-code)", f.target)
+		return fmt.Errorf("알 수 없는 --target: %q (지원: %s)", textsafe.Display(f.target, 60), supportedTargets)
+	}
+	if (f.noHooks || f.removeHooks) && f.target != claudecode.Name {
+		return fmt.Errorf("--no-hooks/--remove-hooks 는 --target %s 에서 지원하지 않습니다 (%s 어댑터는 hook 을 다루지 않습니다; claude-code 전용)", f.target, f.target)
 	}
 	scope := adapter.Scope(f.scope)
 	if scope != adapter.ScopeProject && scope != adapter.ScopeUser {

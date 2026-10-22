@@ -77,6 +77,13 @@ func (a *Adapter) paths(scope adapter.Scope, root string) paths {
 	return p
 }
 
+// StatePath returns the sidecar state file of a scope (root is the project root
+// or the home directory). Other adapters (OpenCode) read it, read-only, to see
+// which skills this target manages; they never write it.
+func (a *Adapter) StatePath(scope adapter.Scope, root string) string {
+	return a.paths(scope, root).state
+}
+
 // AllowedPath implements adapter.Adapter: only the files and skill directories
 // that sync manages are writable, and never the Claude Code user file.
 func (a *Adapter) AllowedPath(scope adapter.Scope, root, path string) (string, error) {

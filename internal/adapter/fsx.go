@@ -64,6 +64,14 @@ func CheckNoSymlinks(root, path string) error {
 	return nil
 }
 
+// ErrHardLinked is returned for a regular file that has more than one hard link
+// (st_nlink > 1). A hard link to a secret file under another name cannot be told
+// apart from the file by its name, and the guard only knows a fixed set of
+// secret files, so every file read through ReadFileSafe (settings and config
+// documents, state files, markers) must be the only name of its content. This
+// holds for plan, apply and restore alike because all of them read through here.
+var ErrHardLinked = errors.New("하드링크된 설정 파일은 지원하지 않습니다(다른 파일과 같은 내용을 공유함)")
+
 // ReadFileSafe reads a regular file without following a symlink at the final
 // component. A missing file returns (nil, false, nil).
 func ReadFileSafe(path string) ([]byte, os.FileInfo, bool, error) {
@@ -82,6 +90,9 @@ func ReadFileSafe(path string) ([]byte, os.FileInfo, bool, error) {
 	}
 	if !fi.Mode().IsRegular() {
 		return nil, nil, true, fmt.Errorf("일반 파일이 아닙니다: %s", path)
+	}
+	if linkCount(fi) > 1 {
+		return nil, nil, true, fmt.Errorf("%w: %s", ErrHardLinked, path)
 	}
 	if fi.Size() > MaxJSONFileBytes {
 		return nil, nil, true, fmt.Errorf("파일이 너무 큽니다(%d바이트): %s", fi.Size(), path)
@@ -107,12 +118,18 @@ func TreeHash(root string, skipMarker bool) (string, []TreeFile, error) {
 		return "", nil, err
 	}
 	var rels []string
+	guard := newFileGuard()
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
 			return nil
+		}
+		if fi, e := d.Info(); e == nil && d.Type().IsRegular() {
+			if e := guard.check(fi); e != nil {
+				return e
+			}
 		}
 		if d.Type()&fs.ModeSymlink != 0 {
 			rel, _ := filepath.Rel(root, p)
@@ -274,6 +291,7 @@ func copyTree(src, dst string, dirMode fs.FileMode, fileMode func(rel string, sr
 	if err := os.Mkdir(dst, dirMode); err != nil {
 		return err
 	}
+	guard := newFileGuard()
 	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -294,6 +312,9 @@ func copyTree(src, dst string, dirMode fs.FileMode, fileMode func(rel string, sr
 		}
 		fi, err := d.Info()
 		if err != nil {
+			return err
+		}
+		if err := guard.check(fi); err != nil {
 			return err
 		}
 		in, err := os.Open(p)

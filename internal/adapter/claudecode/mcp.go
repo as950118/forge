@@ -69,6 +69,9 @@ func renderServer(s *mcp.Info) (entry, string) {
 	var order []string
 	for _, v := range s.Values {
 		var out string
+		if err := adapter.CheckValueKey(v.Slot, v.Key); err != nil {
+			return entry{}, "렌더 거부: 환경변수/헤더 이름이 올바르지 않거나 치환 문법이 있습니다 (" + textsafe.Display(v.Key, 60) + ")"
+		}
 		switch v.RefType {
 		case mcp.RefEnv:
 			if !envNameRe.MatchString(v.Ref) {

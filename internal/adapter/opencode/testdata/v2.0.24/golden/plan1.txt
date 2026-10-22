@@ -1,0 +1,122 @@
+forge sync: opencode  scope=project  root=<PROJ>
+모드: 계획만 출력합니다 (파일을 쓰지 않음). 적용하려면 --apply 를 지정하세요.
+
+종류   이름             작업   이유
+스킬   demo-skill     추가   레지스트리 1.0.0
+MCP  gw-proxied     건너뜀  exposure=gateway: 게이트웨이(forge)가 프록시하므로 직접 쓰지 않음
+MCP  hidden-one     건너뜀  exposure=hidden: 노출하지 않음
+MCP  forge          추가   게이트웨이 서버 (forge mcp serve)
+MCP  fs-direct      추가   직접 노출 서버
+MCP  remote-direct  추가   직접 노출 서버
+
+쓸 파일:
+  생성  <PROJ>/.opencode/skills/demo-skill
+  수정  <PROJ>/opencode.json
+  생성  <PROJ>/.forge/sync-state.opencode.json
+참고: 적용 후 OpenCode 에 반영하려면 직접 `opencode reload` 를 실행하세요 (Forge 는 opencode 를 실행하지 않습니다).
+
+diff (비밀 값은 *** 로 가림):
+--- /dev/null
++++ <PROJ>/.opencode/skills/demo-skill/.forge-managed
+@@ -0,0 +1,6 @@
++{
++  "managed_by": "forge",
++  "name": "demo-skill",
++  "version": "1.0.0",
++  "tree_hash": "5d33bd6cb195532e6b5f52d97de8175ea49c182ec5837c7264ba520269d0e02a"
++}
+--- /dev/null
++++ <PROJ>/.opencode/skills/demo-skill/SKILL.md
+@@ -0,0 +1,6 @@
++---
++name: demo-skill
++description: demo-skill skill.
++version: 1.0.0
++---
++# demo-skill 1.0.0
+--- /dev/null
++++ <PROJ>/.opencode/skills/demo-skill/ref/notes.txt
+@@ -0,0 +1,1 @@
++notes
+--- /dev/null
++++ <PROJ>/.opencode/skills/demo-skill/scripts/run.sh
+@@ -0,0 +1,2 @@
++#!/bin/sh
++echo hi
+--- <PROJ>/opencode.json
++++ <PROJ>/opencode.json
+@@ -27,6 +27,37 @@
+             },
+             "enabled": true
+         },
+-        "user-local": {"type": "local", "command": ["node", "server.js"], "enabled": true}
++        "user-local": {"type": "local", "command": ["node", "server.js"], "enabled": true},
++        "forge": {
++            "type": "local",
++            "command": [
++                "forge",
++                "mcp",
++                "serve",
++                "--client",
++                "opencode"
++            ],
++            "enabled": true
++        },
++        "fs-direct": {
++            "type": "local",
++            "command": [
++                "npx",
++                "-y",
++                "fs-server"
++            ],
++            "environment": {
++                "API_TOKEN": "{env:FS_TOKEN}"
++            },
++            "enabled": true
++        },
++        "remote-direct": {
++            "type": "remote",
++            "url": "https://example.com/mcp",
++            "headers": {
++                "Authorization": "{env:REMOTE_AUTH}"
++            },
++            "enabled": true
++        }
+     }
+ }
+--- /dev/null
++++ <PROJ>/.forge/sync-state.opencode.json
+@@ -0,0 +1,31 @@
++{
++  "version": 1,
++  "target": "opencode",
++  "scope": "project",
++  "items": [
++    {
++      "kind": "mcp",
++      "name": "forge",
++      "hash": "6fc3510f24ce87e7f597142a2dca09e88dd828deaa831e45b71584ec7280ecd4",
++      "applied_at": "2026-10-22T00:00:00Z"
++    },
++    {
++      "kind": "mcp",
++      "name": "fs-direct",
++      "hash": "c172f408f8994f29a7fb731fb5ad656a2f35ec80be5aca4edae60e41be620a1d",
++      "applied_at": "2026-10-22T00:00:00Z"
++    },
++    {
++      "kind": "mcp",
++      "name": "remote-direct",
++      "hash": "e37abda9cf940d6ead69105cc40e3a5f87c98de59317c7ae9d70ddc2adca7679",
++      "applied_at": "2026-10-22T00:00:00Z"
++    },
++    {
++      "kind": "skill",
++      "name": "demo-skill",
++      "hash": "5d33bd6cb195532e6b5f52d97de8175ea49c182ec5837c7264ba520269d0e02a",
++      "applied_at": "2026-10-22T00:00:00Z"
++    }
++  ]
++}
+
+요약: 추가 4 · 변경 0 · 삭제 0 · 충돌 0 · 건너뜀 2 · 변경 없음 0

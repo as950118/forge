@@ -1,0 +1,22 @@
+OpenCode v2.0.24 fixtures (docs/clients/opencode.md, checked 2026-10-21; the binary is never executed).
+
+project_before/                    a project that already has user-written configuration.
+  opencode.json                    4-space indent; "$schema", provider keys (one FAKE literal apiKey that
+                                   must be masked in diffs), permission, two user MCP servers.
+                                   These user-owned keys are NOT interpreted by Forge: preserved byte-for-byte.
+  dot-opencode/skills/user-skill   a user-owned skill ("dot-opencode" is installed as ".opencode")
+golden/                            expected results (UPDATE_GOLDEN=1 go test ./internal/adapter/opencode regenerates)
+
+Evidence of the rendered items
+  [doc]     project skills .opencode/skills/<name>/SKILL.md, user skills ~/.config/opencode/skills/
+  [doc]+[bin] opencode.json top-level "mcp": name -> object; {env:NAME} substitution
+  [doc]     local {type:"local", command:[...], environment:{K:V}, enabled}
+  [doc]     remote {type:"remote", url, headers:{...}, enabled}
+  [help]    opencode mcp add [--url U] [--header k=v] [--env k=v] [--global] <name> [-- cmd args...]; no remove subcommand
+  [bin]     config file names opencode.json / opencode.jsonc; {file:path} substitution
+
+[미확인] and therefore NOT rendered or guessed
+  cwd, timeout (unit), oauth, http vs sse distinction (both -> remote), "tools" glob filters,
+  plugins/hooks, precedence of opencode.json vs opencode.jsonc, behaviour of one skill in both
+  .opencode/skills and .claude/skills, XDG_CONFIG_HOME handling, `opencode mcp add` option order
+  and whether it stores a {env:NAME} value literally.
