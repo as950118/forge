@@ -1,0 +1,5 @@
+demo-skill/.forge-managed 0644 48d8798ee21d96cd
+demo-skill/SKILL.md 0644 e2c6a76f5fd660d3
+demo-skill/ref/notes.txt 0644 444e0fffbd825e96
+demo-skill/scripts/run.sh 0755 299001868fb8c02f
+user-skill/SKILL.md 0644 79c1c0e31159e079
