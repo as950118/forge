@@ -187,6 +187,7 @@ func Run(ctx context.Context, o Options) *Report {
 		{"history", checkHistory},
 		{"hygiene", checkHygiene},
 		{"profile", checkProfile},
+		{"security", checkSecurity},
 	}
 	for _, s := range steps {
 		if ctx.Err() != nil {
@@ -220,7 +221,7 @@ func Run(ctx context.Context, o Options) *Report {
 	return rep
 }
 
-var groupOrder = []string{"home", "client", "drift", "paths", "history", "hygiene", "profile"}
+var groupOrder = []string{"home", "client", "drift", "paths", "history", "hygiene", "profile", "security"}
 
 func groupRank(g string) int {
 	for i, n := range groupOrder {

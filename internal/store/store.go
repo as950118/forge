@@ -294,3 +294,36 @@ func applyOne(ctx context.Context, conn *sql.DB, m migration) error {
 	}
 	return tx.Commit()
 }
+
+// OpenReadOnly opens an existing forge.db for reading without creating or
+// changing anything (no migration, no -wal/-shm helper files when no WAL
+// content is pending). It returns os.ErrNotExist when the file is missing.
+// Same approach as the doctor's read-only open (internal/doctor/dbopen.go);
+// merging the two is left to the adapter/common-layer cleanup (TASK-0023).
+func OpenReadOnly(path string) (*sql.DB, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if fi.IsDir() {
+		return nil, fmt.Errorf("%s 가 파일이 아니라 디렉터리입니다", path)
+	}
+	q := url.Values{}
+	q.Set("mode", "ro")
+	q.Add("_pragma", "busy_timeout(2000)")
+	q.Add("_pragma", "query_only(1)")
+	if wal, err := os.Stat(path + "-wal"); err == nil && wal.Size() > 0 {
+		if _, err := os.Stat(path + "-shm"); err != nil {
+			return nil, errors.New("미반영 WAL 이 남아 있어 읽기 전용으로 열 수 없습니다 (아무 forge 명령이나 한 번 실행하면 정리됩니다)")
+		}
+	} else {
+		q.Set("immutable", "1")
+	}
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path), RawQuery: q.Encode()}
+	conn, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		return nil, err
+	}
+	conn.SetMaxOpenConns(1)
+	return conn, nil
+}

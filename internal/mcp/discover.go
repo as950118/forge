@@ -20,6 +20,8 @@ import (
 	"unicode/utf8"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/heonjinjeong/forge/internal/textsafe"
 )
 
 // DefaultTimeout bounds one whole discovery attempt (connect + initialize + tools/list).
@@ -62,15 +64,24 @@ type RefreshResult struct {
 	Error      string `json:"error,omitempty"`
 	Hint       string `json:"hint,omitempty"`
 	// Detail is the sanitized raw diagnostic (SDK/OS wording); the CLI shows it only with --verbose.
-	Detail          string `json:"detail,omitempty"`
-	ToolCount       int    `json:"tool_count"`
-	Added           int    `json:"added"`
-	Changed         int    `json:"changed"`
-	Removed         int    `json:"removed"` // newly stale
-	ServerName      string `json:"server_name,omitempty"`
-	ServerVersion   string `json:"server_version,omitempty"`
-	ProtocolVersion string `json:"protocol_version,omitempty"`
-	DurationMS      int64  `json:"duration_ms"`
+	Detail    string `json:"detail,omitempty"`
+	ToolCount int    `json:"tool_count"`
+	Added     int    `json:"added"`
+	Changed   int    `json:"changed"`
+	Removed   int    `json:"removed"` // newly stale
+	// Changes lists what differs from the approved definitions (or, for tools
+	// that were never approved, from the previous cache): new tools are
+	// "unapproved (new)", changed definitions come with a sanitized diff.
+	Changes []ToolChange `json:"changes,omitempty"`
+	// Unapproved counts the offered tools without an approval; ChangedFromApproved
+	// the approved tools whose definition differs now.
+	Unapproved          int    `json:"unapproved"`
+	ChangedFromApproved int    `json:"changed_from_approved"`
+	Enforce             bool   `json:"enforce_pinned"`
+	ServerName          string `json:"server_name,omitempty"`
+	ServerVersion       string `json:"server_version,omitempty"`
+	ProtocolVersion     string `json:"protocol_version,omitempty"`
+	DurationMS          int64  `json:"duration_ms"`
 }
 
 type failure struct {
@@ -176,31 +187,40 @@ func (r *Registry) storeSuccess(ctx context.Context, id, now int64, d *discovere
 		id, now, nullStr(d.proto), nullStr(d.srvName), nullStr(d.srvVer)); err != nil {
 		return fmt.Errorf("발견 결과 저장 실패 (서버가 삭제되었을 수 있습니다): %w", err)
 	}
-	old := map[string]struct {
-		hash  string
-		stale bool
-	}{}
-	rows, err := tx.QueryContext(ctx, `SELECT name, schema_hash, stale FROM mcp_tools WHERE server_id=?`, id)
+	type oldTool struct {
+		hash, desc, schema string
+		stale              bool
+	}
+	old := map[string]oldTool{}
+	rows, err := tx.QueryContext(ctx, `SELECT name, schema_hash, COALESCE(description,''), input_schema, stale FROM mcp_tools WHERE server_id=?`, id)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
-		var n, h string
+		var n string
+		var o oldTool
 		var st int
-		if err := rows.Scan(&n, &h, &st); err != nil {
+		if err := rows.Scan(&n, &o.hash, &o.desc, &o.schema, &st); err != nil {
 			_ = rows.Close()
 			return err
 		}
-		old[n] = struct {
-			hash  string
-			stale bool
-		}{h, st == 1}
+		o.stale = st == 1
+		old[n] = o
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
 		return err
 	}
 	_ = rows.Close()
+	approvals, err := loadApprovals(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	var enforceVal string
+	if err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=(SELECT 'mcp.enforce.' || name FROM mcp_servers WHERE id=?)`, id).Scan(&enforceVal); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	res.Enforce = enforceVal == "1"
 	seen := map[string]bool{}
 	for _, t := range d.tools {
 		if seen[t.Name] {
@@ -212,10 +232,28 @@ func (r *Registry) storeSuccess(ctx context.Context, id, now int64, d *discovere
 			schema = []byte("{}")
 		}
 		hash := toolHash(t.Name, t.Description, schema)
-		if o, ok := old[t.Name]; !ok {
+		o, inOld := old[t.Name]
+		if !inOld {
 			res.Added++
 		} else if o.hash != hash {
 			res.Changed++
+		}
+		desc := t.Description
+		ap, approved := approvals[t.Name]
+		switch {
+		case approved && ap.hash == hash:
+			// approved and unchanged: nothing to report
+		case approved:
+			res.ChangedFromApproved++
+			res.Changes = append(res.Changes, toolChange(t.Name, "changed", "approved", true, ap.desc, desc, ap.schema, string(schema), res.Enforce))
+		case !inOld || o.stale:
+			res.Unapproved++
+			res.Changes = append(res.Changes, ToolChange{Name: t.Name, Kind: "new", Hidden: res.Enforce})
+		case o.hash != hash:
+			res.Unapproved++
+			res.Changes = append(res.Changes, toolChange(t.Name, "changed", "previous", false, o.desc, desc, o.schema, string(schema), res.Enforce))
+		default:
+			res.Unapproved++
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO mcp_tools(server_id, name, description, input_schema, schema_hash, stale, discovered_at) VALUES (?,?,?,?,?,0,?)
@@ -228,13 +266,33 @@ func (r *Registry) storeSuccess(ctx context.Context, id, now int64, d *discovere
 	for n, o := range old {
 		if !seen[n] && !o.stale {
 			res.Removed++
+			_, wasApproved := approvals[n]
+			res.Changes = append(res.Changes, ToolChange{Name: n, Kind: "removed", Approved: wasApproved})
 			if _, err := tx.ExecContext(ctx, `UPDATE mcp_tools SET stale=1 WHERE server_id=? AND name=?`, id, n); err != nil {
 				return err
 			}
 		}
 	}
 	res.ToolCount = len(seen)
+	for i := range res.Changes {
+		res.Changes[i].Name = textsafe.Display(res.Changes[i].Name, 120) // display only
+	}
+	sort.SliceStable(res.Changes, func(i, j int) bool { return res.Changes[i].Name < res.Changes[j].Name })
 	return tx.Commit()
+}
+
+// toolChange builds the diff of a changed definition against a baseline
+// (approved definition or previous cache). Names are sanitized for display.
+func toolChange(name, kind, baseline string, approved bool, oldDesc, newDesc, oldSchema, newSchema string, hidden bool) ToolChange {
+	c := ToolChange{Name: name, Kind: kind, Baseline: baseline, Approved: approved, Hidden: hidden}
+	if oldDesc != newDesc {
+		c.DescriptionChanged = true
+		c.OldSpan, c.NewSpan = changedSpan(oldDesc, newDesc)
+	}
+	if sd := schemaDiff(oldSchema, newSchema); len(sd) > 0 {
+		c.SchemaChanged, c.SchemaDiff = true, sd
+	}
+	return c
 }
 
 // maskText replaces every resolved secret value in s with "***" (longest first,

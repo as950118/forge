@@ -319,15 +319,36 @@ func (g *Gateway) build(ctx context.Context, client string) (*catalog, error) {
 			return nil, fmt.Errorf("MCP 서버 %s 를 읽을 수 없습니다: %w", s.Name, err)
 		}
 		n := 0
+		var hidChanged, hidNew int
+		var hidNames []string
 		for _, t := range full.Tools {
 			if t.Stale || t.Name == "" {
+				continue
+			}
+			if !t.Exposable(full.Enforce) {
+				// Tool definition pinning (forge mcp pin --enforce): only definitions
+				// whose hash equals the approved one are exposed; a changed or
+				// never-approved tool is hidden (fails closed) and forge_list says why.
+				if t.Approval == mcp.ApprovalChanged {
+					hidChanged++
+				} else {
+					hidNew++
+				}
+				if len(hidNames) < 5 {
+					hidNames = append(hidNames, string(cleanName(t.Name)))
+				}
 				continue
 			}
 			n++
 			add(rankProxy, "mcp:"+s.Name+":"+t.Name, proxyBase(s.Name, t.Name), &entry{
 				Kind: kindProxy, Server: s.Name, Upstream: t.Name, Desc: listText(t.Description, maxDescBytes), Schema: schemaOf(t.InputSchema), Raw: t.InputSchema})
 		}
-		if n == 0 {
+		if hidChanged+hidNew > 0 {
+			sn := string(cleanName(s.Name))
+			notes = append(notes, fmt.Sprintf("MCP 서버 %s: 도구 정의 고정(enforce)으로 도구 %d개를 숨겼습니다 (승인된 정의와 다름 %d, 미승인 %d): %s. 사용자가 설명을 확인한 뒤 `forge mcp approve %s` 로 승인해야 노출됩니다",
+				sn, hidChanged+hidNew, hidChanged, hidNew, strings.Join(hidNames, ", "), sn))
+		}
+		if n == 0 && hidChanged+hidNew == 0 {
 			notes = append(notes, fmt.Sprintf("MCP 서버 %s: 도구 캐시가 없어 노출하지 않습니다 (forge mcp refresh %s)", s.Name, s.Name))
 		}
 	}

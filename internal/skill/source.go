@@ -22,6 +22,9 @@ type PrepareOptions struct {
 	Limits Limits
 	// Git performs clones; nil uses ExecGit{}.
 	Git Cloner
+	// Ref pins a git source to a branch, tag or commit ("" = default branch
+	// HEAD). Only valid for git URLs; the Cloner must implement RefCloner.
+	Ref string
 }
 
 // Prepared is a validated, staged skill ready to be stored.
@@ -30,9 +33,15 @@ type Prepared struct {
 	Meta       *Meta
 	SourceType string
 	SourceURI  string
-	SourceRef  string
-	Warnings   []string
-	cleanup    func()
+	// SourceRef is the resolved commit for git sources; when the user asked for a
+	// ref it is stored as "<ref>@<commit>" (see SplitSourceRef) so that
+	// `forge skill update` can fetch the same ref again.
+	SourceRef string
+	// RequestedRef is the --ref the user gave ("" = none); Commit the resolved commit.
+	RequestedRef string
+	Commit       string
+	Warnings     []string
+	cleanup      func()
 }
 
 // Cleanup removes the staging area. Safe to call more than once.
@@ -68,6 +77,9 @@ func Prepare(ctx context.Context, src string, opts PrepareOptions) (_ *Prepared,
 		}
 	}()
 
+	if opts.Ref != "" && !(strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "ssh://")) {
+		return nil, fmt.Errorf("--ref 는 git URL(https://, ssh://) 소스에만 사용할 수 있습니다")
+	}
 	var origName string // original directory name, for the name-mismatch warning
 	switch {
 	case strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "ssh://"):
@@ -75,7 +87,20 @@ func Prepare(ctx context.Context, src string, opts PrepareOptions) (_ *Prepared,
 			return nil, err
 		}
 		clone := filepath.Join(stage, "clone")
-		commit, err := opts.Git.Clone(ctx, src, clone)
+		var commit string
+		var err error
+		if opts.Ref != "" {
+			if err := ValidateRef(opts.Ref); err != nil {
+				return nil, err
+			}
+			rc, ok := opts.Git.(RefCloner)
+			if !ok {
+				return nil, fmt.Errorf("이 git 구현은 --ref 를 지원하지 않습니다")
+			}
+			commit, err = rc.CloneRef(ctx, src, opts.Ref, clone)
+		} else {
+			commit, err = opts.Git.Clone(ctx, src, clone)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("git 가져오기 실패: %w", err)
 		}
@@ -85,6 +110,10 @@ func Prepare(ctx context.Context, src string, opts PrepareOptions) (_ *Prepared,
 		}
 		_ = RemoveAllForce(clone)
 		p.Root, p.SourceType, p.SourceURI, p.SourceRef = work, SourceGit, src, commit
+		p.RequestedRef, p.Commit = opts.Ref, commit
+		if opts.Ref != "" {
+			p.SourceRef = opts.Ref + "@" + commit
+		}
 	case strings.Contains(src, "://"):
 		return nil, fmt.Errorf("지원하지 않는 소스 스킴입니다: %q (https://, ssh:// git URL, 로컬 디렉터리, .zip 만 가능)", src)
 	default:
@@ -174,4 +203,13 @@ func findSkillRoot(dir string) (root, nested string, err error) {
 		}
 	}
 	return "", "", fmt.Errorf("SKILL.md 를 찾을 수 없습니다 (소스 루트 또는 단일 최상위 디렉터리에 있어야 합니다)")
+}
+
+// SplitSourceRef splits a stored skill_versions.source_ref into the ref the
+// user requested ("" if none or if it was a bare commit) and the commit.
+func SplitSourceRef(stored string) (requested, commit string) {
+	if i := strings.LastIndexByte(stored, '@'); i > 0 {
+		return stored[:i], stored[i+1:]
+	}
+	return "", stored
 }

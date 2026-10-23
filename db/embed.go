@@ -7,8 +7,8 @@ import (
 )
 
 // SchemaSQL is the snapshot of the latest schema (== all migrations applied).
-// It must stay byte-identical to migrations/0001_init.sql while 0001 is the
-// only migration; see TestSchemaMatchesMigrations and `make check-schema`.
+// It must stay byte-identical to all migrations/*.sql concatenated in version
+// order; see TestEmbeddedSchemaMatchesMigrations and `make check-schema`.
 //
 //go:embed schema.sql
 var SchemaSQL string

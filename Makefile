@@ -15,9 +15,10 @@ build:
 test: check-schema
 	go test ./...
 
-# db/schema.sql (snapshot) must equal db/migrations/0001_init.sql while it is the only migration (ADR-F0001 D5).
+# db/schema.sql (snapshot) must equal all migrations concatenated in order (ADR-F0001 D5; TASK-0013 changed the rule from "== 0001").
+# Regenerate: cat db/migrations/*.sql > db/schema.sql
 check-schema:
-	@cmp -s db/schema.sql db/migrations/0001_init.sql || (echo "db/schema.sql != db/migrations/0001_init.sql"; exit 1)
+	@cat db/migrations/*.sql | cmp -s - db/schema.sql || (echo "db/schema.sql != concatenation of db/migrations/*.sql (cat db/migrations/*.sql > db/schema.sql)"; exit 1)
 
 lint:
 	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run ./...; \

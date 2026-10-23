@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -126,13 +127,23 @@ func TestForeignKeysOnEveryConnection(t *testing.T) {
 
 func TestEmbeddedSchemaMatchesMigrations(t *testing.T) {
 	ctx := context.Background()
-	// 1) schema.sql bytes == 0001_init.sql (sync rule while 0001 is the only migration)
-	b, err := fs.ReadFile(db.Migrations(), "0001_init.sql")
-	if err != nil {
-		t.Fatal(err)
+	// 1) schema.sql bytes == every migration concatenated in version order
+	// (TASK-0013: the snapshot rule changed from "== 0001" once 0002 existed)
+	names, err := fs.Glob(db.Migrations(), "*.sql")
+	if err != nil || len(names) < 2 {
+		t.Fatalf("migrations=%v err=%v", names, err)
 	}
-	if string(b) != db.SchemaSQL {
-		t.Fatal("db/schema.sql and db/migrations/0001_init.sql differ; keep them in sync (cp db/schema.sql db/migrations/0001_init.sql)")
+	sort.Strings(names)
+	var all strings.Builder
+	for _, n := range names {
+		b, err := fs.ReadFile(db.Migrations(), n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all.Write(b)
+	}
+	if all.String() != db.SchemaSQL {
+		t.Fatal("db/schema.sql differs from db/migrations/*.sql concatenated; regenerate: cat db/migrations/*.sql > db/schema.sql")
 	}
 	// 2) sqlite_master equivalence: migrations vs schema.sql applied directly
 	a, _ := openRaw(t)
@@ -242,7 +253,7 @@ func TestOpenMemoryDB(t *testing.T) {
 		t.Errorf("foreign_keys=%q", got)
 	}
 	var n int
-	if err := c.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 1 {
+	if err := c.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 2 {
 		t.Errorf("migrations not applied: n=%d err=%v", n, err)
 	}
 }
@@ -261,5 +272,109 @@ func TestRunnerRecordsRealChecksum(t *testing.T) {
 	h := sha256.Sum256(b)
 	if sum != hex.EncodeToString(h[:]) {
 		t.Errorf("checksum=%q, want sha256 of 0001_init.sql", sum)
+	}
+}
+
+// realMigrationsUpTo returns the embedded migrations with version <= n.
+func realMigrationsUpTo(t *testing.T, n int) fstest.MapFS {
+	t.Helper()
+	names, err := fs.Glob(db.Migrations(), "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(names)
+	m := fstest.MapFS{}
+	for i, name := range names {
+		if i+1 > n {
+			break
+		}
+		b, _ := fs.ReadFile(db.Migrations(), name)
+		m[name] = &fstest.MapFile{Data: b}
+	}
+	return m
+}
+
+// TestMigration0002UpgradePath: a database created by the 0001-only binary is
+// upgraded in place, existing rows survive, the approvals table appears and
+// cascades with its server (TASK-0013).
+func TestMigration0002UpgradePath(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openRaw(t)
+	if err := Migrate(ctx, c, realMigrationsUpTo(t, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ExecContext(ctx, `INSERT INTO mcp_servers(scope,name,transport,command,created_at,updated_at) VALUES('global','keep','stdio','x',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	var has int
+	_ = c.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='mcp_tool_approvals'`).Scan(&has)
+	if has != 0 {
+		t.Fatal("0001 database must not have the approvals table")
+	}
+	if err := Migrate(ctx, c, db.Migrations()); err != nil {
+		t.Fatalf("upgrade 0001->0002: %v", err)
+	}
+	_ = c.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='mcp_tool_approvals'`).Scan(&has)
+	if has != 1 {
+		t.Fatal("approvals table missing after upgrade")
+	}
+	var n int
+	if err := c.QueryRow(`SELECT count(*) FROM mcp_servers WHERE name='keep'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("existing row lost: n=%d err=%v", n, err)
+	}
+	var sid int64
+	_ = c.QueryRow(`SELECT id FROM mcp_servers WHERE name='keep'`).Scan(&sid)
+	if _, err := c.ExecContext(ctx, `INSERT INTO mcp_tool_approvals(server_id,tool_name,approved_hash,input_schema,approved_at) VALUES(?,?,?,?,1)`, sid, "t", strings.Repeat("a", 64), "{}"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ExecContext(ctx, `INSERT INTO mcp_tool_approvals(server_id,tool_name,approved_hash,input_schema,approved_at) VALUES(?,?,?,?,1)`, sid, "bad", "short", "{}"); err == nil {
+		t.Error("approved_hash CHECK (64 chars) not enforced")
+	}
+	if _, err := c.ExecContext(ctx, `DELETE FROM mcp_servers WHERE id=?`, sid); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.QueryRow(`SELECT count(*) FROM mcp_tool_approvals`).Scan(&n)
+	if n != 0 {
+		t.Error("approvals must cascade with the server")
+	}
+	// idempotent re-run
+	if err := Migrate(ctx, c, db.Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := c.Query(`SELECT version, checksum FROM schema_migrations ORDER BY version`)
+	defer rows.Close()
+	got := 0
+	for rows.Next() {
+		var v int
+		var sum string
+		_ = rows.Scan(&v, &sum)
+		name := map[int]string{1: "0001_init.sql", 2: "0002_mcp_tool_approvals.sql"}[v]
+		b, _ := fs.ReadFile(db.Migrations(), name)
+		h := sha256.Sum256(b)
+		if sum != hex.EncodeToString(h[:]) {
+			t.Errorf("version %d checksum mismatch", v)
+		}
+		got++
+	}
+	if got != 2 {
+		t.Errorf("schema_migrations rows=%d", got)
+	}
+}
+
+// TestMigration0002TamperAndDowngrade: a modified 0002 file is refused (checksum)
+// and a 0001-only binary refuses a v2 database (downgrade).
+func TestMigration0002TamperAndDowngrade(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openRaw(t)
+	if err := Migrate(ctx, c, db.Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	tampered := realMigrationsUpTo(t, 2)
+	tampered["0002_mcp_tool_approvals.sql"] = &fstest.MapFile{Data: append(append([]byte{}, tampered["0002_mcp_tool_approvals.sql"].Data...), []byte("\n-- x\n")...)}
+	if err := Migrate(ctx, c, tampered); !errors.Is(err, ErrChecksum) {
+		t.Errorf("tampered 0002: err=%v, want ErrChecksum", err)
+	}
+	if err := Migrate(ctx, c, realMigrationsUpTo(t, 1)); !errors.Is(err, ErrDowngrade) {
+		t.Errorf("v2 database with a 0001-only binary: err=%v, want ErrDowngrade", err)
 	}
 }

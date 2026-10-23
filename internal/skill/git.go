@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -50,6 +51,36 @@ func ValidateGitURL(raw string) error {
 	return nil
 }
 
+// RefCloner is an optional Cloner extension: fetch one ref (branch, tag or
+// commit) instead of the default branch. Tests inject fakes the same way.
+type RefCloner interface {
+	CloneRef(ctx context.Context, repoURL, ref, dest string) (commit string, err error)
+}
+
+var (
+	commitRe = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+	refRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/+-]{0,199}$`)
+)
+
+// IsCommitHash reports whether ref is a full (40 or 64 hex) commit hash, the
+// only kind of ref that cannot move.
+func IsCommitHash(ref string) bool { return commitRe.MatchString(ref) }
+
+// ValidateRef accepts commit hashes, branch names and tag names that cannot be
+// mistaken for a git option or revision expression: no leading '-', no "..",
+// no "@", no spaces/control characters, no trailing ".lock" or "/".
+func ValidateRef(ref string) error {
+	switch {
+	case ref == "":
+		return fmt.Errorf("ref 가 비어 있습니다")
+	case !refRe.MatchString(ref):
+		return fmt.Errorf("ref %q 이 올바르지 않습니다 (영문/숫자로 시작, 영문/숫자/./_/+/-// 만, 최대 200자; 공백·제어 문자·'@'·'~'·'^'·':' 불가)", ref)
+	case strings.Contains(ref, "..") || strings.HasSuffix(ref, ".lock") || strings.HasSuffix(ref, "/") || strings.Contains(ref, "//") || strings.HasSuffix(ref, "."):
+		return fmt.Errorf("ref %q 이 git ref 규칙에 맞지 않습니다", ref)
+	}
+	return nil
+}
+
 // ExecGit runs the external git binary.
 type ExecGit struct {
 	// allowFile permits file:// for tests only (unexported: product code
@@ -57,13 +88,7 @@ type ExecGit struct {
 	allowFile bool
 }
 
-// Clone runs `git clone --depth 1 -- <url> <dest>` and returns HEAD.
-func (g ExecGit) Clone(ctx context.Context, repoURL, dest string) (string, error) {
-	if !g.allowFile {
-		if err := ValidateGitURL(repoURL); err != nil {
-			return "", err
-		}
-	}
+func (g ExecGit) runner(ctx context.Context) func(args ...string) ([]byte, error) {
 	proto := "https:ssh"
 	if g.allowFile {
 		proto = "https:ssh:file"
@@ -72,7 +97,7 @@ func (g ExecGit) Clone(ctx context.Context, repoURL, dest string) (string, error
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_ALLOW_PROTOCOL="+proto,
 	)
-	run := func(args ...string) ([]byte, error) {
+	return func(args ...string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Env = env
 		var out, errb bytes.Buffer
@@ -82,6 +107,50 @@ func (g ExecGit) Clone(ctx context.Context, repoURL, dest string) (string, error
 		}
 		return out.Bytes(), nil
 	}
+}
+
+// CloneRef fetches exactly one ref (`git init` + `git fetch --depth 1 -- <url>
+// <ref>` + detached checkout) and returns the checked-out commit. When ref is a
+// full commit hash the result must be that very commit (a server that returns
+// something else is an error), which is what makes the pin meaningful.
+func (g ExecGit) CloneRef(ctx context.Context, repoURL, ref, dest string) (string, error) {
+	if !g.allowFile {
+		if err := ValidateGitURL(repoURL); err != nil {
+			return "", err
+		}
+	}
+	if err := ValidateRef(ref); err != nil {
+		return "", err
+	}
+	run := g.runner(ctx)
+	if _, err := run("init", "-q", "--", dest); err != nil {
+		return "", err
+	}
+	if _, err := run("-C", dest, "fetch", "-q", "--depth", "1", "--no-tags", "--", repoURL, ref); err != nil {
+		return "", err
+	}
+	if _, err := run("-C", dest, "checkout", "-q", "--detach", "FETCH_HEAD"); err != nil {
+		return "", err
+	}
+	out, err := run("-C", dest, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	commit := strings.TrimSpace(string(out))
+	if IsCommitHash(ref) && commit != ref {
+		return "", fmt.Errorf("요청한 커밋 %s 과 다른 커밋(%s)이 받아졌습니다", ref, commit)
+	}
+	return commit, nil
+}
+
+// Clone runs `git clone --depth 1 -- <url> <dest>` and returns HEAD.
+func (g ExecGit) Clone(ctx context.Context, repoURL, dest string) (string, error) {
+	if !g.allowFile {
+		if err := ValidateGitURL(repoURL); err != nil {
+			return "", err
+		}
+	}
+	run := g.runner(ctx)
 	if _, err := run("clone", "--depth", "1", "--no-tags", "--", repoURL, dest); err != nil {
 		return "", err
 	}

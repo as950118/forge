@@ -49,6 +49,9 @@ type Tool struct {
 	SchemaHash   string          `json:"schema_hash"`
 	Stale        bool            `json:"stale"`
 	DiscoveredAt int64           `json:"discovered_at"`
+	// Approval is approved|changed|unapproved (see approval.go); set by Get.
+	Approval   string `json:"approval"`
+	ApprovedAt int64  `json:"approved_at,omitempty"`
 }
 
 // Info is a registered server. Values carry references only, never secrets.
@@ -66,9 +69,11 @@ type Info struct {
 	Exposure  map[string]string `json:"exposure"`
 	Discovery *Discovery        `json:"discovery,omitempty"`
 	ToolCount int               `json:"tool_count"`
-	Tools     []Tool            `json:"tools,omitempty"`
-	CreatedAt int64             `json:"created_at"`
-	UpdatedAt int64             `json:"updated_at"`
+	// Enforce: the gateway exposes only approved, unchanged tools (settings mcp.enforce.<server>).
+	Enforce   bool   `json:"enforce_pinned"`
+	Tools     []Tool `json:"tools,omitempty"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
 }
 
 // Add registers a validated server definition in one write transaction.
@@ -235,6 +240,13 @@ func (r *Registry) fill(ctx context.Context, id int64, i *Info, detail bool) err
 	}
 	_ = srows.Close()
 
+	var ev string
+	if err := r.DB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, enforceKey(i.Name)).Scan(&ev); err == nil {
+		i.Enforce = ev == "1"
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
 	var d Discovery
 	var ok int
 	var e, pv, sn, sv sql.NullString
@@ -277,6 +289,10 @@ func (r *Registry) fill(ctx context.Context, id int64, i *Info, detail bool) err
 		i.Values = append(i.Values, v)
 	}
 	_ = vrows.Close()
+	approvals, err := loadApprovals(ctx, r.DB, id)
+	if err != nil {
+		return err
+	}
 	trows, err := r.DB.QueryContext(ctx, `SELECT name, COALESCE(description,''), input_schema, schema_hash, stale, discovered_at FROM mcp_tools WHERE server_id=? ORDER BY name`, id)
 	if err != nil {
 		return err
@@ -291,6 +307,15 @@ func (r *Registry) fill(ctx context.Context, id int64, i *Info, detail bool) err
 		}
 		t.Stale = st == 1
 		t.InputSchema = json.RawMessage(sch)
+		t.Approval = ApprovalNew
+		if a, ok := approvals[t.Name]; ok {
+			t.ApprovedAt = a.at
+			if a.hash == t.SchemaHash {
+				t.Approval = ApprovalApproved
+			} else {
+				t.Approval = ApprovalChanged
+			}
+		}
 		i.Tools = append(i.Tools, t)
 	}
 	return trows.Err()
@@ -397,6 +422,9 @@ func (r *Registry) Remove(ctx context.Context, name string) error {
 	}
 	p := exposurePrefix(name)
 	if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE substr(key,1,?)=?`, len(p), p); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, enforceKey(name)); err != nil {
 		return err
 	}
 	return tx.Commit()

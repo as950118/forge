@@ -22,7 +22,7 @@ func skillCmd() *cobra.Command {
 	var project bool
 	cmd := &cobra.Command{
 		Use:   "skill",
-		Short: "Manage skills (add|list|show|remove|enable|disable|validate|misses)",
+		Short: "Manage skills (add|update|check|list|show|remove|enable|disable|validate|misses)",
 		PersistentPreRunE: func(*cobra.Command, []string) error {
 			if project {
 				// TODO(project-scope): see skill.ScopeGlobal.
@@ -33,7 +33,7 @@ func skillCmd() *cobra.Command {
 	}
 	cmd.PersistentFlags().BoolVar(&project, "project", false, "프로젝트 범위 (미지원)")
 	cmd.AddCommand(
-		skillAddCmd(), skillListCmd(), skillShowCmd(), skillRemoveCmd(),
+		skillAddCmd(), skillUpdateCmd(), skillCheckCmd(), skillListCmd(), skillShowCmd(), skillRemoveCmd(),
 		skillToggleCmd("enable", true), skillToggleCmd("disable", false),
 		skillValidateCmd(), skillMissesCmd(),
 	)
@@ -44,50 +44,6 @@ func writeJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
-}
-
-func skillAddCmd() *cobra.Command {
-	var asJSON bool
-	cmd := &cobra.Command{
-		Use:   "add <dir|file.zip|https-or-ssh-git-url>",
-		Short: "Add a skill from a directory, zip file or git URL",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			reg, conn, err := openRegistry(cmd.Context())
-			if err != nil {
-				return err
-			}
-			defer conn.Close()
-			p, err := skill.Prepare(cmd.Context(), args[0], skill.PrepareOptions{TmpDir: homeTmp(reg.Home)})
-			if err != nil {
-				return err
-			}
-			defer p.Cleanup()
-			res, err := reg.Add(cmd.Context(), p)
-			if err != nil {
-				return err
-			}
-			out := cmd.OutOrStdout()
-			if asJSON {
-				return writeJSON(out, map[string]any{"result": res, "warnings": p.Warnings})
-			}
-			for _, w := range p.Warnings {
-				fmt.Fprintf(cmd.ErrOrStderr(), "경고: %s\n", w)
-			}
-			switch res.Status {
-			case "unchanged":
-				fmt.Fprintf(out, "변경 없음: %s@%s 는 이미 등록되어 있습니다 (내용 해시 %.12s)\n", res.Name, res.Version, res.Hash)
-			case "new_version":
-				fmt.Fprintf(out, "새 버전 추가: %s@%s (해시 %.12s)\n", res.Name, res.Version, res.Hash)
-				fmt.Fprintf(out, "새 버전이 현재 버전이 되었습니다(이전: %s)\n", res.PreviousVersion)
-			default:
-				fmt.Fprintf(out, "추가됨: %s@%s (해시 %.12s)\n", res.Name, res.Version, res.Hash)
-			}
-			return nil
-		},
-	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON 출력")
-	return cmd
 }
 
 func homeTmp(home string) string { return filepath.Join(home, "tmp") }

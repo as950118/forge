@@ -17,6 +17,7 @@ import (
 	"github.com/heonjinjeong/forge/internal/mcp"
 	"github.com/heonjinjeong/forge/internal/profile"
 	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/heonjinjeong/forge/internal/textsafe"
 	"github.com/heonjinjeong/forge/internal/tool"
 )
 
@@ -32,7 +33,7 @@ func mcpCmd() *cobra.Command {
 	var project bool
 	cmd := &cobra.Command{
 		Use:   "mcp",
-		Short: "Manage MCP servers (add|list|show|remove|refresh|enable|disable|expose|serve)",
+		Short: "Manage MCP servers (add|list|show|remove|refresh|approve|pin|enable|disable|expose|serve)",
 		PersistentPreRunE: func(*cobra.Command, []string) error {
 			if project {
 				// TODO(project-scope): see mcp.ScopeGlobal.
@@ -43,7 +44,7 @@ func mcpCmd() *cobra.Command {
 	}
 	cmd.PersistentFlags().BoolVar(&project, "project", false, "프로젝트 범위 (미지원)")
 	cmd.AddCommand(
-		mcpAddCmd(), mcpListCmd(), mcpShowCmd(), mcpRemoveCmd(), mcpRefreshCmd(),
+		mcpAddCmd(), mcpListCmd(), mcpShowCmd(), mcpRemoveCmd(), mcpRefreshCmd(), mcpApproveCmd(), mcpPinCmd(),
 		mcpToggleCmd("enable", true), mcpToggleCmd("disable", false), mcpExposeCmd(),
 		mcpServeCmd(),
 	)
@@ -56,6 +57,8 @@ func mcpAddCmd() *cobra.Command {
 		envs, headers       []string
 		timeoutMS           int
 		asJSON              bool
+		previewOnly, strict bool
+		yes                 bool
 	)
 	cmd := &cobra.Command{
 		Use:   "add <name> [flags] [-- <command> [args...]]",
@@ -72,7 +75,11 @@ URL 경로/쿼리와 -- 뒤 인자에도 같은 검사를 적용하며, 비밀�
 셸이 값을 확장하지 않도록 '${ENV_NAME}' 처럼 작은따옴표로 감싸세요.
 
 환경: stdio 서버는 refresh 와 게이트웨이 모두 최소 환경(PATH/HOME/LANG/프록시 등)과 --env 로 선언한 변수만 받습니다.
-부모 셸의 다른 환경변수(API 키 등)는 전달되지 않으므로 서버가 필요로 하는 변수는 --env KEY='${KEY}' 로 선언하세요.`,
+부모 셸의 다른 환경변수(API 키 등)는 전달되지 않으므로 서버가 필요로 하는 변수는 --env KEY='${KEY}' 로 선언하세요.
+
+미리보기: 등록 전에 항상 정확한 실행 명령줄·버전 고정 여부(npx @latest 등)·원격 URL 위험(평문 http, 사설 주소)·env/헤더 참조 이름(값 비표시)을
+stderr 로 출력합니다. --preview 는 미리보기만 하고 아무것도 등록하지 않으며(DB 도 열지 않음), --strict 는 등록 전에 승인(터미널 y/N 또는 --yes)을 요구합니다.
+기본은 질문 없이 등록합니다(로컬 설정 작업). 등록 후 도구 정의 고정은 forge mcp approve / pin 을 보세요.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -113,6 +120,25 @@ URL 경로/쿼리와 -- 뒤 인자에도 같은 검사를 적용하며, 비밀�
 			if err := spec.Validate(); err != nil {
 				return err
 			}
+			pv := mcp.BuildPreview(spec)
+			if !asJSON {
+				renderMCPPreview(cmd.ErrOrStderr(), pv, "MCP 서버 등록 미리보기")
+			}
+			if previewOnly {
+				if asJSON {
+					return writeJSON(cmd.OutOrStdout(), map[string]any{"preview": pv, "registered": false, "preview_only": true})
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "미리보기만 출력했습니다. 아무것도 등록하지 않았습니다.")
+				return nil
+			}
+			if strict {
+				if err := confirmInstall(cmd, yes, "위 미리보기를 확인했습니다. 이 MCP 서버를 등록할까요?", "forge mcp add --preview "+shq(name)+" <같은 인자>"); err != nil {
+					if asJSON {
+						_ = writeJSON(cmd.OutOrStdout(), map[string]any{"preview": pv, "registered": false, "error": err.Error()})
+					}
+					return err
+				}
+			}
 			reg, closeFn, err := openMCP(cmd)
 			if err != nil {
 				return err
@@ -126,7 +152,7 @@ URL 경로/쿼리와 -- 뒤 인자에도 같은 검사를 적용하며, 비밀�
 				if err != nil {
 					return err
 				}
-				return writeJSON(cmd.OutOrStdout(), map[string]any{"server": info})
+				return writeJSON(cmd.OutOrStdout(), map[string]any{"server": info, "preview": pv, "registered": true})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "추가됨: %s (%s). 도구 목록을 가져오려면: forge mcp refresh %s\n", name, spec.Transport, name)
 			return nil
@@ -139,7 +165,10 @@ URL 경로/쿼리와 -- 뒤 인자에도 같은 검사를 적용하며, 비밀�
 	f.StringArrayVar(&headers, "header", nil, "http/sse 헤더 Name=${ENV_NAME} 또는 Name=literal (반복 가능)")
 	f.StringVar(&cwd, "cwd", "", "stdio 작업 디렉터리")
 	f.IntVar(&timeoutMS, "timeout-ms", 0, "발견 타임아웃(ms). 기본 30000")
-	f.BoolVar(&asJSON, "json", false, "JSON 출력")
+	f.BoolVar(&asJSON, "json", false, "JSON 출력 (미리보기 포함)")
+	f.BoolVar(&previewOnly, "preview", false, "미리보기만 출력하고 등록하지 않음")
+	f.BoolVar(&strict, "strict", false, "등록 전에 승인(터미널 y/N 또는 --yes) 필수")
+	f.BoolVarP(&yes, "yes", "y", false, "--strict 의 비대화형 승인")
 	return cmd
 }
 
@@ -243,6 +272,7 @@ func mcpShowCmd() *cobra.Command {
 				ex = append(ex, c+"="+i.Exposure[c])
 			}
 			fmt.Fprintf(out, "노출:       %s\n", strings.Join(ex, ", "))
+			fmt.Fprintf(out, "도구 고정:  %s\n", map[bool]string{true: "enforce 켜짐 (게이트웨이는 승인된 정의와 해시가 같은 도구만 노출)", false: "enforce 꺼짐 (forge mcp pin " + shq(i.Name) + " --enforce)"}[i.Enforce])
 			if len(i.Values) > 0 {
 				fmt.Fprintln(out, "\n값 (참조만 표시, 비밀 값은 저장되지 않음):")
 				for _, v := range i.Values {
@@ -267,15 +297,44 @@ func mcpShowCmd() *cobra.Command {
 			}
 			if len(i.Tools) > 0 {
 				tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-				fmt.Fprintln(tw, "\nTOOL\tSTALE\tDESCRIPTION")
+				fmt.Fprintln(tw, "\nTOOL\tSTALE\tAPPROVAL\tDESCRIPTION")
+				var chg, newc int
 				for _, t := range i.Tools {
 					st := ""
 					if t.Stale {
 						st = "stale"
 					}
-					fmt.Fprintf(tw, "%s\t%s\t%s\n", t.Name, st, truncate(t.Description, 70))
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", textsafe.Display(t.Name, 80), st, approvalLabel(t.Approval), textsafe.Display(truncate(t.Description, 70), 300))
+					if !t.Stale {
+						switch t.Approval {
+						case mcp.ApprovalChanged:
+							chg++
+						case mcp.ApprovalNew:
+							newc++
+						}
+					}
 				}
-				return tw.Flush()
+				if err := tw.Flush(); err != nil {
+					return err
+				}
+				if chg+newc > 0 {
+					// The table cuts descriptions; what a person must read before approving is the whole text.
+					fmt.Fprintln(out, "\n[승인 전 확인: 승인되지 않았거나 변경된 도구의 설명 전문 (한 줄로 정화, 최대 1000자)]")
+					shown := 0
+					for _, t := range i.Tools {
+						if t.Stale || t.Approval == mcp.ApprovalApproved {
+							continue
+						}
+						if shown == 20 {
+							fmt.Fprintln(out, "  … (이하 생략)")
+							break
+						}
+						shown++
+						fmt.Fprintf(out, "  %s (%s): %s\n", textsafe.Display(t.Name, 80), approvalLabel(t.Approval), textsafe.Display(strings.Join(strings.Fields(t.Description), " "), 1000))
+					}
+					fmt.Fprintf(out, "\n! 승인된 정의와 다른 도구 %d개, 미승인 도구 %d개. 설명을 읽은 뒤 승인: forge mcp approve %s\n", chg, newc, shq(i.Name))
+				}
+				return nil
 			}
 			return nil
 		},
@@ -438,7 +497,8 @@ func mcpRefreshCmd() *cobra.Command {
 				}
 				if res.OK {
 					fmt.Fprintf(out, "OK   %s: 도구 %d개 (신규 %d, 변경 %d, 사라짐 %d) · %s %s · %dms\n",
-						res.Name, res.ToolCount, res.Added, res.Changed, res.Removed, res.ServerName, res.ServerVersion, res.DurationMS)
+						res.Name, res.ToolCount, res.Added, res.Changed, res.Removed, textsafe.Display(res.ServerName, 80), textsafe.Display(res.ServerVersion, 40), res.DurationMS)
+					renderRefreshChanges(out, res)
 				} else {
 					fmt.Fprintf(out, "FAIL %s: [%s] %s\n     해결: %s\n     (이전 캐시는 유지되었습니다)\n", res.Name, res.ErrorClass, res.Error, res.Hint)
 					if verbose && res.Detail != "" {

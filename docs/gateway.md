@@ -87,9 +87,13 @@ claude mcp add --scope user forge -- forge mcp serve
 - 한계(코드로 막을 수 없음): 사용자가 래퍼 스크립트로 `unset FORGE_GATEWAY; exec forge mcp serve` 를 실행하면 재귀 방지(`FORGE_GATEWAY=1`)를 우회할 수 있다(사람이 명시적으로 만든 구성이며 자기 프록시 방지의 command 검사는 `sh -c` 래퍼까지만 본다). 게이트웨이가 SIGKILL 로 죽으면 종료 절차가 돌지 못해, stdin EOF 로 끝나지 않는 서버나 그 서버가 띄운 손자 프로세스는 고아로 남을 수 있다.
 - HTTP/SSE 서버의 응답 본문은 수신 후에 절단한다(수신 중 메모리 상한은 없음, 알려진 한계).
 
+### MCP 도구 정의 고정 (`forge mcp pin --enforce`, TASK-0013)
+
+서버별 설정(`settings` 키 `mcp.enforce.<서버>`, 기본 꺼짐). 켜면 `build` 가 그 서버의 캐시된 도구 중 **승인된 정의와 해시가 같은 것만** 노출하고(`forge mcp approve` 로 기록, `mcp_tool_approvals`), 변경됐거나 미승인인 도구는 `tools/list` 에서 빠지며 호출해도 알 수 없는 도구로 거부된다. `forge_list` 의 경고에 "도구 정의 고정(enforce)으로 도구 N개를 숨겼습니다 (승인된 정의와 다름 a, 미승인 b): <이름 최대 5개>. ... `forge mcp approve <서버>`" 가 나온다(이름은 정화, 숨겨진 도구의 설명은 싣지 않음). 승인 기록이 없으면 모든 도구가 숨겨진다(안전하게 닫힘). 적용 범위는 게이트웨이를 거치는(`gateway`) 노출뿐이며, 게이트웨이는 호출 때 업스트림의 `tools/list` 를 다시 비교하지 않고 마지막 `forge mcp refresh` 의 캐시 기준으로 판정한다. 테스트: `TestEnforceHidesChangedAndUnapprovedTools`, `TestEnforceIsPerServer`, `TestEnforceNoteEscapesToolNames`.
+
 ## 스킬 조회 `forge_skill`
 
-입력 `{name, file?}`. 이름이 없거나 인자가 스키마에 맞지 않는 호출(추가 속성 포함)은 항상 `name=forge_skill, ok=0, error_class=invalid_args` 로 기록하고 요청한 스킬 이름은 남기지 않는다(커스텀 도구·프록시의 인자 오류와 확인 단계의 인자 오류도 각자 이름으로 `invalid_args`, JSON 객체가 아닌 arguments 도 `invalid_args`). 활성 스킬의 현재 버전 스냅샷에서 `SKILL.md`(또는 `file`)와 파일 목록(최대 200개)을 반환한다. 128KiB 상한, 절대 경로·`..`·심볼릭 링크 탈출 거부, 텍스트 파일만. 없는 스킬은 `found=0` miss, 비활성은 `found=0, error_class=disabled` 로 기록하고 한국어 오류를 돌려준다.
+입력 `{name, file?}`. 이름이 없거나 인자가 스키마에 맞지 않는 호출(추가 속성 포함)은 항상 `name=forge_skill, ok=0, error_class=invalid_args` 로 기록하고 요청한 스킬 이름은 남기지 않는다(커스텀 도구·프록시의 인자 오류와 확인 단계의 인자 오류도 각자 이름으로 `invalid_args`, JSON 객체가 아닌 arguments 도 `invalid_args`). 활성 스킬의 현재 버전 스냅샷에서 `SKILL.md`(또는 `file`)와 파일 목록(최대 200개)을 반환한다. 반환 전에 스냅샷을 다시 해시해 등록된 `content_hash` 와 비교하고(`skill.VerifyStore`), 다르면(변조·손상 의심) 아무것도 제공하지 않고 `forge skill check` 를 안내한다(TASK-0013, `TestForgeSkillRefusesTamperedSnapshot`). 128KiB 상한, 절대 경로·`..`·심볼릭 링크 탈출 거부, 텍스트 파일만. 없는 스킬은 `found=0` miss, 비활성은 `found=0, error_class=disabled` 로 기록하고 한국어 오류를 돌려준다.
 
 ## 원장 (AC-4)
 

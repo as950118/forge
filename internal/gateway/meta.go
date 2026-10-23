@@ -158,16 +158,22 @@ func (g *Gateway) callSkill(ctx context.Context, args map[string]any, client, ve
 	if pv, ok := g.exposure(ctx).(PinnedSkills); ok {
 		want = pv.PinnedVersion(info, client)
 	}
-	var store, shown string
+	var store, shown, wantHash string
 	for _, v := range info.Versions {
 		if (want == "" && v.Current) || (want != "" && v.Version == want) {
-			store, shown = v.StorePath, v.Version
+			store, shown, wantHash = v.StorePath, v.Version, v.Hash
 		}
 	}
 	root, err := g.skillRoot(store)
 	if err != nil {
 		c.endClass(classInternal, nil)
 		return errResult(err.Error())
+	}
+	// Tamper detection: the files about to be served must still hash to the
+	// content hash recorded when the version was added (same scheme as sync).
+	if st, _, _ := skill.VerifyStore(root, wantHash); st != skill.StoreOK {
+		c.endClass(classInternal, nil)
+		return errResult(fmt.Sprintf("스킬 \"%s\" (버전 %s) 의 저장된 파일이 등록된 해시와 다릅니다 (변조 또는 손상 의심: %s). 제공하지 않습니다. 사용자에게 `forge skill check` 실행을 알려 주세요", cleanName(info.Name), cleanName(shown), st))
 	}
 	rel := "SKILL.md"
 	if f, ok := args["file"].(string); ok && f != "" {
