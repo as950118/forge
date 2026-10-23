@@ -315,10 +315,13 @@ func (r *Registry) SetEnabled(ctx context.Context, name string, enabled bool) er
 
 // exposurePrefix is the settings key prefix holding per-client exposure for a server.
 //
-// The schema only models exposure per profile member (profile_member_exposure,
-// TASK-0012). Until profiles exist, the server-level default per client is kept
-// in the settings table as "mcp.exposure.<server>.<client>" = direct|gateway|hidden
-// (no row = direct). TODO(profile-exposure): fold into profile_member_exposure.
+// Profiles (package profile, TASK-0012) are the formal store of exposure
+// (profile_member_exposure). This settings key is the LEGACY per-client default
+// that applies while no profile is active for the client (rule "legacy"); an
+// active profile ignores it, and `forge mcp expose|enable|disable --client`
+// refuse to change it then (internal/cli/profile.go). `forge profile create
+// --from-current` copies these settings into a profile.
+// "mcp.exposure.<server>.<client>" = direct|gateway|hidden (no row = direct).
 func exposurePrefix(name string) string { return "mcp.exposure." + name + "." }
 
 // SetExposure sets how a server is exposed to one client.

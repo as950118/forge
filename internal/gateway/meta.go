@@ -41,7 +41,7 @@ func schemaOf(raw []byte) any {
 	return map[string]any{"type": "object"}
 }
 
-func (g *Gateway) skillDescription(ctx context.Context) string {
+func (g *Gateway) skillDescription(ctx context.Context, client string) string {
 	d := "Forge 레지스트리의 스킬 본문(SKILL.md)과 파일 목록을 이름으로 조회합니다. 작업에 맞는 스킬이 있으면 먼저 조회해 지침을 따르세요."
 	infos, err := g.o.Skills.List(ctx)
 	if err != nil {
@@ -49,7 +49,7 @@ func (g *Gateway) skillDescription(ctx context.Context) string {
 	}
 	var parts []string
 	for _, s := range infos {
-		if !s.Enabled || !g.o.Exposure.SkillVisible(&s, "") {
+		if !s.Enabled || !g.exposure(ctx).SkillVisible(&s, client) {
 			continue
 		}
 		if len(parts) == maxListedSkills {
@@ -92,7 +92,7 @@ func (g *Gateway) callList(ctx context.Context, client string) *sdk.CallToolResu
 	infos, _ := g.o.Skills.List(ctx)
 	n := 0
 	for _, s := range infos {
-		if s.Enabled && g.o.Exposure.SkillVisible(&s, client) {
+		if s.Enabled && g.exposure(ctx).SkillVisible(&s, client) {
 			fmt.Fprintf(&b, "- %s: %s\n", s.Name, listText(s.Description, 160))
 			n++
 		}
@@ -149,13 +149,19 @@ func (g *Gateway) callSkill(ctx context.Context, args map[string]any, client, ve
 		c.endClass(classInternal, nil)
 		return errResult("스킬 조회 중 오류가 발생했습니다: " + err.Error())
 	}
-	if !info.Enabled || !g.o.Exposure.SkillVisible(info, client) {
+	if !info.Enabled || !g.exposure(ctx).SkillVisible(info, client) {
 		return miss(classDisabled)
 	}
-	var store string
+	// A profile may pin the skill to one immutable version; otherwise the
+	// current version is served.
+	want := ""
+	if pv, ok := g.exposure(ctx).(PinnedSkills); ok {
+		want = pv.PinnedVersion(info, client)
+	}
+	var store, shown string
 	for _, v := range info.Versions {
-		if v.Current {
-			store = v.StorePath
+		if (want == "" && v.Current) || (want != "" && v.Version == want) {
+			store, shown = v.StorePath, v.Version
 		}
 	}
 	root, err := g.skillRoot(store)
@@ -177,7 +183,7 @@ func (g *Gateway) callSkill(ctx context.Context, args map[string]any, client, ve
 		return errResult(err.Error())
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# 스킬: %s (버전 %s)\n\n", info.Name, info.CurrentVersion)
+	fmt.Fprintf(&b, "# 스킬: %s (버전 %s)\n\n", info.Name, shown)
 	if rel != "SKILL.md" {
 		fmt.Fprintf(&b, "파일: %s\n\n", filepath.ToSlash(filepath.Clean(rel)))
 	}

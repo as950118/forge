@@ -3,7 +3,7 @@
 Forge 가 stdio MCP 서버가 되어 한 엔드포인트로 다음을 제공한다 (PLAN §3.1, TASK-0007).
 
 1. 등록된 커스텀 도구 (`forge tool`, 활성인 것)
-2. 등록된 MCP 서버 프록시 (`forge mcp`, 활성 + 해당 클라이언트 exposure=`gateway`, 캐시된 도구)
+2. 등록된 MCP 서버 프록시 (`forge mcp`, 활성 + 해당 클라이언트 exposure=`gateway`, 캐시된 도구; 프로필이 있으면 프로필 멤버만)
 3. 메타 도구 `forge_skill`(스킬 조회), `forge_list`(노출 목록)
 
 표준 출력은 프로토콜 전용이다. 로그는 `FORGE_GATEWAY_DEBUG=1` 일 때만 표준 오류로 나오며 인자·결과 본문은 기록하지 않는다.
@@ -47,7 +47,15 @@ claude mcp add --scope user forge -- forge mcp serve
 
 ## 노출 필터링 (AC-3)
 
-프로필(TASK-0012)이 없으므로 `Exposure` 인터페이스(`internal/gateway/exposure.go`)의 기본 구현 `SettingsExposure` 를 쓴다. `TODO(profile-exposure)`: TASK-0012 가 이 인터페이스만 교체한다.
+`Exposure` 인터페이스(`internal/gateway/exposure.go`)의 구현은 둘이다. `forge mcp serve` 는 `ProfileExposure`(TASK-0012)를 쓰고, 활성 프로필이 없는 클라이언트에는 기존 구현 `SettingsExposure` 로 되돌아간다(`docs/profile.md` §1 우선순위: (클라이언트, 이 게이트웨이의 프로젝트) 활성 프로필 → 클라이언트의 전역 활성 프로필 → 레거시). 프로필은 요청마다 읽으므로 `forge profile use|unuse|add|remove` 는 실행 중인 게이트웨이에 재시작 없이 다음 요청부터 반영된다.
+
+프로필이 적용되면 **허용 목록**이다(멤버가 아닌 서버·도구·스킬은 노출하지 않음, `mcp.exposure.*` 설정은 무시):
+- MCP 서버: 멤버이고 그 클라이언트의 노출이 `gateway` 인 것만 프록시(`direct` 는 클라이언트가 직접 연결, `hidden`·비멤버는 제외).
+- 커스텀 도구: 멤버이고 `hidden` 이 아닌 것(커스텀 도구는 게이트웨이로만 나간다).
+- 스킬(`forge_skill`, `forge_list`): 멤버이고 `hidden` 이 아닌 것(`direct`·`gateway` 모두 조회 가능). 핀이 있으면 `forge_skill` 이 그 불변 버전을 제공하고 응답 머리말에 그 버전이 표시된다.
+- 프로필 조회가 실패하면(DB 오류·시간 초과 3초) 항목을 숨긴다(fail closed). 클라이언트를 식별하지 못한(`""`) 연결은 레거시 규칙과 프로필이 있는 모든 클라이언트의 프로필을 모두 만족하는 항목만 본다.
+
+프로필이 없는 클라이언트의 동작(기존):
 
 - MCP 서버: 활성이고 `mcp.exposure.<서버>.<클라이언트>` = `gateway` 인 서버만 프록시한다. `direct`(기본, 클라이언트가 직접 연결)와 `hidden` 은 제외. 도구 캐시(`forge mcp refresh`)가 없는 서버는 노출하지 않고 `forge_list` 경고에 안내한다(시작 시 임의 서버를 기동하지 않기 위함).
 - 커스텀 도구: 활성이고 `confirm != deny`. 클라이언트별 노출 저장소가 아직 없어 모든 클라이언트에 같다.

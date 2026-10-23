@@ -34,19 +34,3 @@ func TestVersion(t *testing.T) {
 		t.Errorf("unexpected version output: %q", out)
 	}
 }
-
-func TestStubs(t *testing.T) {
-	for _, n := range []string{"profile"} { // sync is implemented (sync_test.go)
-		out := run(t, n)
-		if !strings.Contains(out, "not implemented yet (TASK-") {
-			t.Errorf("%s: unexpected output %q", n, out)
-		}
-	}
-}
-
-func TestDoctor(t *testing.T) {
-	out := run(t, "doctor")
-	if !strings.Contains(out, "not implemented yet (TASK-0012)") || !strings.Contains(out, "schema.sql embedded: true") {
-		t.Errorf("unexpected doctor output: %q", out)
-	}
-}

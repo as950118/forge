@@ -185,10 +185,12 @@ func (g *Gateway) buildServer() *sdk.Server {
 			}
 			switch method {
 			case "tools/list":
-				return g.listTools(ctx, ss)
+				client, _ := g.clientOf(ss)
+				return g.listTools(g.withSnapshot(ctx, client), ss)
 			case "tools/call":
 				if r, ok := req.(*sdk.CallToolRequest); ok {
-					return g.callTool(ctx, ss, r.Params)
+					client, _ := g.clientOf(ss)
+					return g.callTool(g.withSnapshot(ctx, client), ss, r.Params)
 				}
 			}
 			return next(ctx, method, req)
@@ -280,7 +282,7 @@ func (g *Gateway) build(ctx context.Context, client string) (*catalog, error) {
 	}
 	var notes []string
 
-	add(rankMeta, "meta:"+MetaSkill, MetaSkill, &entry{Kind: kindMeta, Tool: MetaSkill, Desc: g.skillDescription(ctx), Schema: schemaOf(skillSchema)})
+	add(rankMeta, "meta:"+MetaSkill, MetaSkill, &entry{Kind: kindMeta, Tool: MetaSkill, Desc: g.skillDescription(ctx, client), Schema: schemaOf(skillSchema)})
 	add(rankMeta, "meta:"+MetaList, MetaList, &entry{Kind: kindMeta, Tool: MetaList, Desc: "Forge 게이트웨이가 현재 노출 중인 도구와 스킬의 요약(이름·설명)을 반환합니다.", Schema: schemaOf(listSchema)})
 
 	defs, err := g.o.Tools.List(ctx)
@@ -289,7 +291,7 @@ func (g *Gateway) build(ctx context.Context, client string) (*catalog, error) {
 	}
 	for i := range defs {
 		d := &defs[i]
-		if !d.Enabled || d.Policy.Confirm == tool.ConfirmDeny || !g.o.Exposure.ToolVisible(d, client) {
+		if !d.Enabled || d.Policy.Confirm == tool.ConfirmDeny || !g.exposure(ctx).ToolVisible(d, client) {
 			continue
 		}
 		desc := listText(d.Description, maxDescBytes)
@@ -305,7 +307,7 @@ func (g *Gateway) build(ctx context.Context, client string) (*catalog, error) {
 	}
 	for i := range servers {
 		s := &servers[i]
-		if !s.Enabled || g.o.Exposure.ServerMode(s, client) != mcp.ExposureGateway {
+		if !s.Enabled || g.exposure(ctx).ServerMode(s, client) != mcp.ExposureGateway {
 			continue
 		}
 		if self, why := g.isSelfProxy(s); self {

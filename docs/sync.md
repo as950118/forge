@@ -31,7 +31,9 @@ forge sync --prune-backups [--keep 20] [--dry-run]       # 오래된 백업 삭�
 
 | 플래그 | 의미 |
 |--------|------|
-| `--target claude-code\|opencode` | 대상 클라이언트 (필수). 다른 값은 지원 목록과 함께 오류 |
+| `--target claude-code\|opencode\|all` | 대상 클라이언트 (필수). `all` 은 두 클라이언트를 하나의 통합 계획으로 처리한다("`--target all`" 절). 다른 값은 지원 목록과 함께 오류 |
+| `--check-version` | (계획용) 대상 클라이언트의 `<binary> --version` 을 실행해 검증된 버전인지 계획에 표시한다. 기본 계획은 실행하지 않는다. `--apply` 와 함께 쓸 수 없다 |
+| `--allow-untested-version` | `--apply` 전용: 검증되지 않은 클라이언트 버전(warn)이어도 계속 진행한다 ("버전 게이트" 절) |
 | `--scope project\|user` | 기본 `project`. 아래 "스코프별 대상" 참고 |
 | `--project-dir <경로>` | 프로젝트 스코프의 시작 디렉터리(기본 현재 디렉터리). `.git` 이 있는 상위 디렉터리를 저장소 루트로 쓴다. `.git` 이 없으면 지정한 디렉터리를 쓰고 계획에 참고를 남긴다. **홈 디렉터리, Forge 홈(`$FORGE_HOME`), `~/.claude` 자체는 프로젝트 루트로 쓸 수 없다** (아래 "금지 루트") |
 | `--dry-run` / `--apply` | 동시 지정은 오류. 둘 다 없으면 계획만 출력 |
@@ -73,7 +75,7 @@ forge sync --target opencode --scope user          # 스킬은 ~/.config/opencod
 ```
 
 `--scope`, `--project-dir`, `--dry-run`, `--diff`, `--apply`, `--skip-conflicts`, `--force-managed`, `--json`, `--bin`, `--restore`, `--list-backups`, `--prune-backups` 는 claude-code 와 같이 동작한다.
-`--no-hooks`/`--remove-hooks` 는 지원하지 않는다(오류): OpenCode 의 hook/플러그인 수집은 이번 범위에 없다. **Forge 는 `opencode` 를 어떤 서브명령으로도 실행하지 않는다.**
+`--no-hooks`/`--remove-hooks` 는 지원하지 않는다(오류): OpenCode 의 hook/플러그인 수집은 이번 범위에 없다. **Forge 는 `opencode`·`claude` 를 `--version`(버전 게이트, "버전 게이트" 절) 말고는 어떤 서브명령·플래그로도 실행하지 않는다.**
 적용 뒤 OpenCode 에 반영하려면 사용자가 직접 `opencode reload` 를 실행한다(계획이 안내만 한다).
 
 ### 스코프별 대상
@@ -237,7 +239,7 @@ OpenCode 는 `.opencode/skills` 뿐 아니라 `.claude/skills` 도 읽는다([do
 ## 지원 버전과 형식 근거
 
 지원 버전 목록: **Claude Code 2.1.305** (`claudecode.SupportedVersions`). 픽스처: `internal/adapter/claudecode/testdata/2.1.305/`
-(`project_before/` 입력, `golden/` 기대 출력; `UPDATE_GOLDEN=1 go test ./internal/adapter/claudecode` 로 갱신). `claude --version` 으로 설치 버전을 확인하는 기능은 없다(외부 바이너리 실행은 범위 밖, TASK-0012 doctor).
+(`project_before/` 입력, `golden/` 기대 출력; `UPDATE_GOLDEN=1 go test ./internal/adapter/claudecode` 로 갱신). 설치 버전은 `forge sync --apply`·`forge doctor` 의 버전 게이트가 `claude --version` 으로만 확인한다("버전 게이트" 절, 지원 버전 표는 `clientver.Specs`). 다른 버전 형식 변화가 확인되면 이 절에 픽스처 추가 절차(TASK-0022 AC-5)를 문서화한다.
 
 | 항목 | 근거 |
 |------|------|
@@ -262,3 +264,27 @@ OpenCode 는 `.opencode/skills` 뿐 아니라 `.claude/skills` 도 읽는다([do
 - 크래시 복구: 저널은 백업 디렉터리(`$FORGE_HOME/backups`)에 있어야 인식된다(백업을 지웠거나 `FORGE_HOME` 을 바꾸면 중단 사실을 모르고 평소 규칙대로 충돌로 보고한다). 복구는 "앞으로 완료"만 자동이며, 중단 후 사용자가 같은 항목을 수정하면 충돌로 남는다. 중단된 sync 가 쓴 MCP 서버·hook 이 복구 전에 레지스트리에서 사라졌다면 자동으로 제거하지 않는다. pid 생존 검사는 pid 가 재사용되면 임시 파일을 오래 남길 수 있다(지우지 않는 쪽으로만 틀린다). 복구 백업의 `--restore` 는 중단된 sync 의 변경까지 되돌리지만, 중간 상태 트리는 직후 해시를 기록하지 못해 `--force` 가 필요할 수 있다. 전원 차단 시 파일시스템이 쓰기 순서를 바꾸는 환경은 가정하지 않는다(`fsync` 사용).
 - plan 이 레지스트리 DB 를 읽기 전용으로 열 때 빈 `-wal`/`-shm` 파일이 남을 수 있다(TASK-0021 에서 처리).
 - Windows 는 검증하지 않았다(잠금은 `.held` 파일 방식 폴백).
+
+## 프로필, `--target all`, 버전 게이트 (TASK-0012)
+
+### 프로필 반영
+
+계획·적용은 (클라이언트, 프로젝트)에 적용되는 프로필을 따른다(`docs/profile.md` §1: 프로젝트 활성 프로필 → 클라이언트 전역 활성 프로필 → 프로필 없음=기존 동작). 프로필이 있으면 **허용 목록**이다: 프로필에 없는 스킬·MCP 서버는 렌더링되지 않고, 이전에 Forge 가 쓴 것이면 관리 항목 삭제로 계획된다. 스킬은 `direct` 노출인 멤버만 클라이언트 스킬 디렉터리에 렌더링되며 핀이 있으면 그 불변 버전을 복사한다. MCP 서버는 프로필의 멤버 노출(`direct|gateway|hidden`)을 `mcp.exposure.*` 대신 쓴다. 계획에는 `참고: 프로필 "<이름>" 적용 (…)` 또는 `참고: 프로필 없음: 레거시 동작…` 줄이 항상 나온다. `--scope user` 는 전역 활성 프로필만 따른다. hook 은 프로필과 무관하다. `forge profile use` 는 활성화만 기록하고 파일을 쓰지 않으므로 반영하려면 sync 를 실행해야 한다.
+
+### `--target all`
+
+```bash
+forge sync --target all [--diff] [--json]        # claude-code 와 opencode 를 하나의 통합 계획으로 (쓰지 않음)
+forge sync --target all --apply [--skip-conflicts] [--allow-untested-version]
+```
+
+- 두 어댑터의 계획을 **모두 계산한 뒤** 판단한다. 출력은 `=== claude-code ===`, `=== opencode ===` 계획과 `=== 통합 요약 ===`(충돌 합계, `--apply` 에서는 대상별 적용 상태). `--json` 은 `{"schema":1,"target":"all","mode","conflicts","applied":[…],"partial","targets":[{"target","status","error","report":<단일 대상 report>}],"restore":[…]}` 이며 `status` 는 `planned|applied|failed|not-applied`.
+- **충돌이 둘 중 어디에든 하나라도 있으면 `--apply` 는 아무것도 쓰지 않는다**(백업도 만들지 않는다). `--skip-conflicts` 는 양쪽의 충돌 항목만 제외하고 적용한다.
+- **중복 노출 방지**: OpenCode 는 `.claude/skills` 도 읽는다. claude-code 계획이 관리하게 될 스킬(계획 후 상태 파일 기준)은 opencode 계획에서 "claude-code 가 관리"로 건너뛴다(`Request.ClaimedSkills`). 적용 순서는 항상 claude-code → opencode.
+- **적용은 순차이며 하나의 트랜잭션이 아니다.** 각 어댑터는 자체적으로 원자적이다(백업·저널·롤백). 두 대상의 잠금을 고정 순서로 모두 잡은 채 계획하고 적용한다. claude-code 가 실패하면 opencode 는 적용하지 않는다(`not-applied`). claude-code 가 적용된 뒤 opencode 가 실패하면 **부분 성공**이다: 출력이 `부분 성공: claude-code 만 적용되었고…`, 대상별 상태, 적용된 쪽을 되돌리는 명령(`forge sync --restore <백업 id>`)과 재시도 안내를 보여 주고 종료 코드는 비0(`일부만 적용되었습니다: …`)이다. 같은 명령을 다시 실행하면 이미 적용된 쪽은 변경 없음으로 수렴한다.
+- `--no-hooks`/`--remove-hooks` 는 claude-code 에만 적용된다. 백업·복원 명령(`--list-backups/--restore/--prune-backups`)은 대상 하나씩 다룬다.
+
+### 버전 게이트
+
+`forge sync --apply` 는 파일을 쓰기 전에 대상 클라이언트마다 `<binary> --version`(그 외 인자 없음)을 실행해 분류한다(정확히 검증된 버전 ok, 같은 major.minor 의 다른 patch info "미검증 패치", 그 밖의 버전·실행 실패·인식 불가 warn "미검증 버전: 생성한 설정이 올바르게 로드되지 않을 수 있습니다", 바이너리 없음 info).
+warn 이 하나라도 있으면 **아무것도 쓰지 않고 중단**하며 `--allow-untested-version` 을 안내한다. 결과는 계획의 `참고:` 줄에 남고 캐시하지 않는다. 계획(`--apply` 없음)은 기본적으로 클라이언트를 실행하지 않는다(`--check-version` 으로 옵트인). 실행 안전 설계(PATH 탐색, 프로젝트 안 바이너리 거부, 환경 격리, 타임아웃·출력 상한)와 지원 버전 표는 `docs/doctor.md`.

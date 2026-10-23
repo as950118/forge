@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/heonjinjeong/forge/internal/profile"
 	"io"
 	"path/filepath"
 	"strings"
@@ -182,6 +183,7 @@ func skillRemoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			warnProfileMembers(cmd, conn, profile.KindSkill, args[0])
 			if !yes {
 				fmt.Fprintf(cmd.ErrOrStderr(), "스킬 %q (버전 %d개) 와 저장된 파일을 모두 삭제합니다. 계속할까요? [y/N] ", info.Name, info.VersionCount)
 				line, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')

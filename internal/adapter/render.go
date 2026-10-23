@@ -138,14 +138,30 @@ func WriteJSON(w io.Writer, r *Report) error {
 	return enc.Encode(r)
 }
 
+// Mode lines of WriteTextAs for an --apply run whose plan was NOT applied
+// (res == nil): the plain "plan only" line would be wrong there.
+const (
+	ModeApplyFailed     = "모드: 적용을 시도했으나 실패했습니다 (롤백 결과는 아래 오류 메시지를 보세요). 이 계획은 적용되지 않았습니다."
+	ModeApplyNotApplied = "모드: --apply 였지만 이 대상은 적용하지 않았습니다 (파일을 쓰지 않음). 이유는 아래 오류 메시지·요약을 보세요."
+)
+
 // WriteText prints the plan as a human-readable table.
 func WriteText(w io.Writer, p *Plan, res *ApplyResult, withDiff bool) {
+	WriteTextAs(w, p, res, withDiff, "")
+}
+
+// WriteTextAs is WriteText with an explicit mode line for a plan that was not
+// applied during --apply (ModeApplyFailed, ModeApplyNotApplied); "" = the default.
+func WriteTextAs(w io.Writer, p *Plan, res *ApplyResult, withDiff bool, mode string) {
 	r := BuildReport(p, res, withDiff)
 	fmt.Fprintf(w, "forge sync: %s  scope=%s  root=%s\n", r.Target, r.Scope, r.Root)
-	if res == nil {
-		fmt.Fprintln(w, "모드: 계획만 출력합니다 (파일을 쓰지 않음). 적용하려면 --apply 를 지정하세요.")
-	} else {
+	switch {
+	case res != nil:
 		fmt.Fprintln(w, "모드: 적용")
+	case mode != "":
+		fmt.Fprintln(w, mode)
+	default:
+		fmt.Fprintln(w, "모드: 계획만 출력합니다 (파일을 쓰지 않음). 적용하려면 --apply 를 지정하세요.")
 	}
 	for _, in := range r.Interrupted {
 		what := "sync"

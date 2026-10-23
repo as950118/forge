@@ -176,6 +176,27 @@ func loadMigrations(fsys fs.FS) ([]migration, error) {
 	return ms, nil
 }
 
+// MigrationInfo describes one embedded migration (for read-only checks such as forge doctor).
+type MigrationInfo struct {
+	Version  int
+	Name     string
+	Checksum string
+}
+
+// EmbeddedMigrations lists the migrations this binary carries with the checksum
+// Migrate records for them.
+func EmbeddedMigrations() ([]MigrationInfo, error) {
+	ms, err := loadMigrations(db.Migrations())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MigrationInfo, len(ms))
+	for i, m := range ms {
+		out[i] = MigrationInfo{Version: m.version, Name: m.name, Checksum: m.checksum}
+	}
+	return out, nil
+}
+
 // ErrDowngrade is returned when the database is newer than this binary.
 var ErrDowngrade = errors.New("DB 스키마가 이 forge 바이너리보다 최신입니다. forge 를 업그레이드하세요")
 

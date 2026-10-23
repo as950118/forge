@@ -27,6 +27,9 @@ const DefaultKeepBackups = 20
 
 var backupIDRe = regexp.MustCompile(`^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{6}$`)
 
+// ValidBackupID reports whether id has the shape of a backup directory name.
+func ValidBackupID(id string) bool { return backupIDRe.MatchString(id) }
+
 // Entry records one path touched by an apply: how it looked before (and where
 // the copy is), and how it looked right after.
 type Entry struct {
