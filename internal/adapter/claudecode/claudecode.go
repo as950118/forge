@@ -32,7 +32,9 @@ const Name = "claude-code"
 
 // SupportedVersions lists the Claude Code versions the formats were documented
 // against (docs/clients/claude-code.md). Fixtures live in testdata/<version>/.
-// Sync never runs the claude binary to check the installed version.
+// The adapter never runs the claude binary. The version gate of `forge sync
+// --apply` and `forge doctor` (package clientver) runs "claude --version" and
+// nothing else; its verified-version table must match this list.
 var SupportedVersions = []string{"2.1.305"}
 
 // GatewayServerName is the .mcp.json entry that points at `forge mcp serve`.

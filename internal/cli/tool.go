@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/heonjinjeong/forge/internal/profile"
 	"os"
 	"path/filepath"
 	"sort"
@@ -332,6 +333,7 @@ func toolRemoveCmd() *cobra.Command {
 			if _, err := reg.Get(cmd.Context(), args[0]); err != nil {
 				return err
 			}
+			warnProfileMembers(cmd, reg.DB, profile.KindTool, args[0])
 			if !yes {
 				fmt.Fprintf(cmd.ErrOrStderr(), "도구 %q 를 삭제합니다. 계속할까요? [y/N] ", args[0])
 				line, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')

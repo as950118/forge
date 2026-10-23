@@ -1,6 +1,7 @@
 # OpenCode 설정 형식 (TASK-0001 스파이크)
 
 - 확인 버전: **OpenCode v2.0.24** (`opencode --version`, `/Users/heonjinjeong/.opencode/bin/opencode`, 단일 Mach-O 바이너리)
+- 버전 게이트: 이 "확인 버전"이 `internal/clientver` 의 지원 버전 표(`clientver.Specs`)이며 테스트가 이 줄과 대조한다. `forge sync --apply`·`forge doctor` 는 `opencode --version` 만 실행해 비교한다(`docs/doctor.md`).
 - 확인일: 2026-10-21
 - 근거 표기: `[doc]` 공식 문서(opencode.ai/docs/{mcp-servers,plugins,skills}), `[help]` `opencode ... --help`, `[local]` 로컬 파일/DB 관찰(홈은 읽기만, 비밀값 미기록), `[bin]` 설치 바이너리에 내장된 번들 텍스트(`strings`) 관찰, `[미확인]`.
 - **중요 주의:** 설치본은 v2.x 로 **SQLite 기반 세션 저장·백그라운드 서비스 구조**(`opencode service`, `opencode serve`, `session_v2` 테이블)이다. 공식 문서 페이지는 어느 버전 기준인지 명시가 없고 `[doc]` 항목 중 v2.0.24 에서 `[bin]`/`[help]`/`[local]` 로 교차 확인되지 않은 것은 "문서 기준(미교차확인)"으로 표시한다. 로컬에는 사용자 설정(`opencode.json`)·플러그인·MCP·스킬이 하나도 없고(`opencode mcp list`=없음, `plugin list`=없음), 유일한 세션은 모델 엔드포인트 오류로 실패한 것이라 **도구 호출 기록의 실제 형태는 관찰하지 못했다.**

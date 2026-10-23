@@ -357,6 +357,11 @@ func (pl *planner) checkConfigFiles() error {
 // records the skills that target manages under .claude/skills.
 func (pl *planner) loadClaims() {
 	pl.claimed = map[string]bool{}
+	for n, v := range pl.req.ClaimedSkills {
+		if v {
+			pl.claimed[n] = true
+		}
+	}
 	cc := claudecode.New(pl.a.ForgeHome)
 	path := cc.StatePath(pl.scope, pl.p.root)
 	warn := func(why string) {

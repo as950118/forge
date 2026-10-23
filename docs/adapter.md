@@ -18,7 +18,8 @@ CLI(`internal/cli/sync.go`)는 추가로 `ResolveRoot(adapter.Request) (root str
 
 ### 입력 `Inputs` / `Request`
 
-- `adapter.LoadInputs(ctx, forgeHome, client)` 가 레지스트리를 **읽기 전용** DB 핸들로 읽어 `Inputs{Client, Skills, Servers}` 를 만든다. 활성(enabled) 스킬의 현재 버전(`SkillInput{Name, Version, Hash, StoreDir}`)과 활성 MCP 서버(`*mcp.Info`)만 들어간다. `Client` 는 MCP 노출 설정(`mcp.exposure.<서버>.<client>`; 기본 direct)을 찾는 키라서 **어댑터 이름이 레지스트리 `clients` 테이블의 id 와 같아야 한다**(`claude-code`, `opencode`).
+- `adapter.LoadInputsFor(ctx, forgeHome, client, project)`(`LoadInputs` 는 project 없이 부르는 얇은 래퍼)가 레지스트리를 **읽기 전용** DB 핸들로 읽어 `Inputs{Client, Skills, Servers, Profile}` 를 만든다. 활성(enabled) 스킬(`SkillInput{Name, Version, Hash, StoreDir}`)과 활성 MCP 서버(`*mcp.Info`)만 들어가며, (client, project)에 적용되는 프로필이 있으면(`docs/profile.md` §1 우선순위) 프로필 멤버만 남고(허용 목록), 스킬은 `direct` 노출 멤버가 핀 버전(없으면 현재 버전)으로, MCP 서버는 `Exposure[client]` 가 프로필의 노출로 바뀐다. 프로필이 없으면 기존처럼 현재 버전과 MCP 노출 설정(`mcp.exposure.<서버>.<client>`; 기본 direct)을 쓴다. `Client` 는 노출을 찾는 키라서 **어댑터 이름이 레지스트리 `clients` 테이블의 id 와 같아야 한다**(`claude-code`, `opencode`). 어댑터는 `Inputs.Profile` 을 읽지 않는다(Inputs 가 이미 반영돼 있다); CLI 가 적용 규칙을 계획 참고로 표시한다.
+- `Request.ClaimedSkills`: 같은 실행에서 다른 타깃(claude-code)이 계획한 스킬 이름. opencode 어댑터는 디스크의 claude-code 상태 파일이 알려 주는 것에 더해 이것도 "claude-code 가 관리"로 취급해 다시 렌더링하지 않는다(`forge sync --target all` 의 통합 계획용).
 - `Request`: `Scope`(project|user), `ProjectDir`, `Home`, `ForgeBin`, `NoHooks`/`RemoveHooks`, `BackupDir`, `SyncInProgress`, `ForceManaged`, `Now`. 타깃이 지원하지 않는 요청 필드는 **조용히 무시하지 말고 오류**로 거부한다(opencode 는 `NoHooks`/`RemoveHooks` 를 거부한다).
 
 ### 출력 `Plan`
@@ -56,7 +57,7 @@ CLI(`internal/cli/sync.go`)는 추가로 `ResolveRoot(adapter.Request) (root str
 
 ## 새 타깃(Codex, Gemini CLI 등) 추가 체크리스트
 
-1. **형식 검증 스파이크 문서**: `docs/clients/<client>.md` 에 경로, 설정 키, 값 치환 문법, CLI 옵션, 비밀이 들어 있는 파일을 `[doc]`/`[help]`/`[local]`/`[bin]`/`[미확인]` 으로 구분해 적는다. **클라이언트 바이너리는 실행하지 않는다**(필요하면 `strings` 로 읽기만).
+1. **형식 검증 스파이크 문서**: `docs/clients/<client>.md` 에 경로, 설정 키, 값 치환 문법, CLI 옵션, 비밀이 들어 있는 파일을 `[doc]`/`[help]`/`[local]`/`[bin]`/`[미확인]` 으로 구분해 적는다. **클라이언트 바이너리는 어댑터 개발 중에도 실행하지 않는다**(필요하면 `strings` 로 읽기만). 예외는 버전 게이트(`internal/clientver`)가 실행하는 `<binary> --version` 하나뿐이며, 새 타깃을 추가할 때는 `clientver.Specs` 에 바이너리 이름과 검증된 버전을 넣고 `docs/doctor.md` 표를 갱신한다.
 2. **레지스트리 클라이언트 id**: `db` 의 `clients` 테이블에 id 가 있어야 노출 설정(`mcp expose`)이 동작한다(스키마 변경은 별도 태스크).
 3. **어댑터 구현**: `internal/adapter/<client>/` — `Name`, `Plan`, `AllowedPath`, `ResolveRoot`; 상태·저널 파일 이름을 다른 타깃과 겹치지 않게 정한다. `[미확인]` 항목은 추정하지 않고 렌더하지 않는다(계획의 참고로 알린다).
 4. **가드**: 비밀 파일의 (디렉터리, 이름)을 `guard.go` 에 추가하고(동일 파일 판정 포함; 이름만으로 막지 않는다) 금지 루트를 어댑터 `forbiddenRoot` 에 추가한다. 프로젝트 설정 파일이 오탐으로 막히지 않는지 시험한다.
@@ -88,5 +89,5 @@ CLI(`internal/cli/sync.go`)는 추가로 `ResolveRoot(adapter.Request) (root str
 
 - 어댑터 두 개의 계획·스킬·MCP 코드는 구조가 같지만 **복사**되어 있다(`opencode/skills.go`, `mcp.go`, `docfile.go`, `opencode.go` 는 claudecode 의 해당 파일에서 파생). 세 번째 타깃이 생기면 공통 계층(`planner` 의 상태·저널 처리, 스킬 계획, JSON 문서 로더)을 `internal/adapter` 로 올리는 리팩터링이 필요하다.
 - 중복 노출 방지는 **opencode → claude-code 방향만** 구현되어 있다. opencode 가 먼저 스킬을 `.opencode/skills` 에 썼다면, 이후 claude-code 를 sync 하면 같은 스킬이 두 경로에 있게 된다. 이어서 opencode 를 다시 sync 하면 중복이 제거된다(수렴). claude-code 어댑터에는 같은 방지가 없다(범위 밖; 후속 과제). 같은 프로젝트의 project 스코프 opencode 와 user 스코프 claude-code(`~/.claude/skills`) 사이의 중복은 검사하지 않는다.
-- opencode: `opencode.jsonc`(주석)는 편집하지 않는다(주석 보존 불가) — `opencode.json` 이 없으면 중단, 둘 다 있으면 우선순위 [미확인] 경고. `[미확인]` 항목(cwd, timeout, oauth, tools 글롭, 플러그인)은 다루지 않는다. 버전 게이팅(`opencode --version`)은 하지 않는다(doctor, TASK-0012).
+- opencode: `opencode.jsonc`(주석)는 편집하지 않는다(주석 보존 불가) — `opencode.json` 이 없으면 중단, 둘 다 있으면 우선순위 [미확인] 경고. `[미확인]` 항목(cwd, timeout, oauth, tools 글롭, 플러그인)은 다루지 않는다. 버전 게이팅(`opencode --version`)은 어댑터가 아니라 CLI 의 버전 게이트(`forge sync --apply`, `forge doctor`; `docs/doctor.md`)가 한다.
 - 프로젝트 스코프 레지스트리·프로필별 노출은 아직 없다(docs/sync.md 한계).

@@ -1,18 +1,33 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/heonjinjeong/forge/internal/clientver"
 	"github.com/heonjinjeong/forge/internal/mcp/mcptest"
 )
 
 func TestMain(m *testing.M) {
 	mcptest.MaybeRunStdio()
+	// Tests never run a real claude/opencode: by default no client is "installed"
+	// (an unusable PATH) and a runner that refuses to run anything is wired in.
+	// Tests that need a client use fakeClients (version_test.go).
+	versionChecker = func(dirs []string) *clientver.Checker {
+		return &clientver.Checker{PathEnv: "/nonexistent-forge-test-path", ProjectDirs: dirs, Runner: neverRunner{}}
+	}
 	os.Exit(m.Run())
+}
+
+// neverRunner fails the test run if anything tries to execute a client.
+type neverRunner struct{}
+
+func (neverRunner) RunVersion(_ context.Context, path string) (clientver.RunResult, error) {
+	panic("tests must not execute a client binary: " + path)
 }
 
 func TestMCPLifecycleStdio(t *testing.T) {

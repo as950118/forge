@@ -15,6 +15,7 @@ import (
 	"github.com/heonjinjeong/forge/internal/gateway"
 	"github.com/heonjinjeong/forge/internal/ledger"
 	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/heonjinjeong/forge/internal/profile"
 	"github.com/heonjinjeong/forge/internal/store"
 	"github.com/heonjinjeong/forge/internal/tool"
 )
@@ -298,6 +299,7 @@ func mcpRemoveCmd() *cobra.Command {
 			if _, err := reg.Get(cmd.Context(), args[0]); err != nil {
 				return err
 			}
+			warnProfileMembers(cmd, reg.DB, profile.KindMCP, args[0])
 			if !yes {
 				fmt.Fprintf(cmd.ErrOrStderr(), "MCP 서버 %q 와 도구 캐시를 삭제합니다. 계속할까요? [y/N] ", args[0])
 				line, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
@@ -334,6 +336,9 @@ func mcpToggleCmd(use string, enable bool) *cobra.Command {
 				if enable {
 					mode = mcp.ExposureDirect
 				}
+				if err := refuseWhileProfileActive(cmd, reg, client, args[0], mode); err != nil {
+					return err
+				}
 				if err := reg.SetExposure(cmd.Context(), args[0], client, mode); err != nil {
 					return err
 				}
@@ -344,6 +349,7 @@ func mcpToggleCmd(use string, enable bool) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", word, args[0])
+			noteProfilesActive(cmd, reg)
 			return nil
 		},
 	}
@@ -366,6 +372,9 @@ func mcpExposeCmd() *cobra.Command {
 				return err
 			}
 			defer closeFn()
+			if err := refuseWhileProfileActive(cmd, reg, client, args[0], mode); err != nil {
+				return err
+			}
 			if err := reg.SetExposure(cmd.Context(), args[0], client, mode); err != nil {
 				return err
 			}
@@ -492,12 +501,19 @@ func mcpServeCmd() *cobra.Command {
 			}
 			defer conn.Close()
 			cwd, _ := os.Getwd()
+			// The active profile for (client, this project) decides what is exposed
+			// (docs/profile.md); the project is the repository root of the cwd.
+			root, perr := profile.ProjectRoot(cwd)
+			if perr != nil {
+				root = ""
+			}
 			gw, err := gateway.New(gateway.Options{
 				Name: name, Version: cmd.Root().Version, Client: client, Project: cwd,
 				Servers:  &mcp.Registry{DB: conn},
 				Tools:    &tool.Registry{DB: conn, Home: skills.Home},
 				Skills:   skills,
 				Recorder: &ledger.SQLite{DB: conn},
+				Exposure: gateway.ProfileExposure{DB: conn, Project: root},
 			})
 			if err != nil {
 				return err

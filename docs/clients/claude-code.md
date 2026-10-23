@@ -1,6 +1,7 @@
 # Claude Code 설정 형식 (TASK-0001 스파이크)
 
 - 확인 버전: **Claude Code 2.1.305** (`claude --version`, `/Users/heonjinjeong/.local/bin/claude`)
+- 버전 게이트: 이 "확인 버전"이 `internal/clientver` 의 지원 버전 표(`clientver.Specs`)이며 테스트가 이 줄과 대조한다. `forge sync --apply`·`forge doctor` 는 `claude --version` 만 실행해 비교한다(`docs/doctor.md`).
 - 확인일: 2026-10-21
 - 근거 표기: `[doc]` 공식 문서(code.claude.com/docs/en/{skills,mcp,hooks}), `[help]` `claude ... --help` 출력, `[local]` 로컬 파일 관찰(홈은 읽기만, 비밀값 미기록), `[미확인]` 확인 못함.
 - 공식 문서는 최신판을 가져온 것이라 2.1.305와 정확히 같다는 보장이 없다. `[doc]` 항목은 doctor/픽스처 테스트로 재검증이 필요하다(R1).

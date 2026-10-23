@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/heonjinjeong/forge/internal/profile"
 )
 
 // Scope selects where a sync writes.
@@ -218,7 +219,12 @@ type Request struct {
 	// ForceManaged lets Forge overwrite managed items that were edited by hand
 	// (still backed up). User-owned items are never touched.
 	ForceManaged bool
-	Now          func() time.Time
+	// ClaimedSkills are skills another target planned in the same run
+	// (`forge sync --target all`: claude-code's) and will manage under
+	// .claude/skills, which OpenCode also reads: they are not rendered a second
+	// time. It adds to what the claude-code sidecar on disk already claims.
+	ClaimedSkills map[string]bool
+	Now           func() time.Time
 }
 
 // Inputs is a read-only snapshot of the registry for one client.
@@ -227,6 +233,9 @@ type Inputs struct {
 	Client  string
 	Skills  []SkillInput
 	Servers []*mcp.Info
+	// Profile is the precedence result the inputs were computed with (nil when
+	// the inputs were built by hand, e.g. in tests: treated as the legacy rule).
+	Profile *profile.Resolved
 }
 
 // SkillInput is an enabled skill at its current version.
