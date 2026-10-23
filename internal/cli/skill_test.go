@@ -138,7 +138,7 @@ func TestSkillAddZipAndRemoveYes(t *testing.T) {
 	_, _ = w.Write([]byte(demoMD))
 	_ = zw.Close()
 	f.Close()
-	mustRun(t, "skill", "add", zp)
+	mustRun(t, "skill", "add", "--yes", zp)
 	if out := mustRun(t, "skill", "show", "demo-skill"); !strings.Contains(out, "zip") {
 		t.Errorf("show: %q", out)
 	}

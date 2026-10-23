@@ -62,6 +62,10 @@ Forge 홈·DB, 클라이언트 설치, sync 드리프트, 깨진 경로, 이력,
 | 프로필 | 적용 규칙 | 클라이언트별 `project`/`global`=ok, `legacy`=info(`profile create --from-current`) |
 | | 활성 프로필 건강 | 손상/삭제된 멤버=fail, 빈 프로필=warn, 비활성 멤버=warn, 핀 버전 파일 누락=warn, claude-code direct + opencode hidden 불일치=warn, 무시되는 레거시 노출 설정=info |
 | | 없어진 프로젝트의 활성화 (`profile.stale`) | `projects.path` 가 더 이상 존재하지 않는(`stat` 이 ENOENT/ENOTDIR) 프로젝트에 활성화가 남아 있음=warn. 경로·마지막 활성화 날짜를 보이고 해결로 `forge profile prune-stale --dry-run`(목록 확인)과 `forge profile prune-stale --yes`(실제 정리)를 제시. 점검은 경로를 `stat` 할 뿐 아무것도 바꾸지 않는다 |
+| 보안 (TASK-0013, `docs/security.md`) | 스킬 저장소 무결성 (`security.skills`) | 활성 스킬 현재 버전의 `~/.forge/skills/<이름>@<버전>` 파일을 가져오기 한도 안에서 다시 해시해 등록된 `content_hash` 와 비교(`forge skill check` 와 같은 `skill.VerifyStore`). 다르거나 심볼릭 링크·추가 파일이 있음=fail(`forge skill check <이름>`, 삭제 후 재등록 안내), 읽을 수 없음=warn, 누락은 위 "스킬 저장소" 점검이 보고 |
+| | MCP 도구 정의 승인 (`security.mcp`) | 도구 캐시가 있는 활성 서버 중 승인된 정의와 다른 도구가 있거나 승인 이후 새로 생긴 도구가 있음=warn(`forge mcp show <서버>`, `forge mcp approve <서버>`), 없음=ok. 승인 기록 테이블이 없는 옛 DB=info |
+| | 승인 기록 없음 (`security.mcp.unapproved`) | 한 번도 승인하지 않은 서버=info(승인하면 이후 변경을 감지) |
+| | 도구 고정 (`security.mcp.enforce`) | enforce 가 꺼져 있음=info(`forge mcp pin <서버> --enforce`), 켜져 있고 게이트웨이가 숨기는 도구가 있음=warn, 숨김 없음=ok. 해결 명령의 서버 이름은 셸 인용 규칙을 따른다 |
 
 ### 프로필 해결 명령은 (클라이언트, 프로젝트)와 실제 이름을 포함한다
 
