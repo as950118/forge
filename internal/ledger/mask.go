@@ -47,7 +47,12 @@ var (
 // maskPayload is the only way payload bytes become storable text: it parses raw
 // JSON, masks secrets (by key name, by value pattern, inline), caps string and
 // document size, and returns valid JSON. There is no unmasked path.
-func maskPayload(raw []byte) (string, error) {
+func maskPayload(raw []byte) (string, error) { return maskPayloadMode(raw, true) }
+
+// maskPayloadMode: persist=true is the storage rule (strict: paths and identifiers
+// get no exception, see mcp.LooksSecretPersist); persist=false is for transient
+// display (paths and labelled identifiers stay readable).
+func maskPayloadMode(raw []byte, persist bool) (string, error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
 		return "", nil
@@ -60,7 +65,7 @@ func maskPayload(raw []byte) (string, error) {
 		b, _ := json.Marshal(map[string]any{"_unparsed": true, "_bytes": len(raw)})
 		return string(b), nil
 	}
-	out, err := json.Marshal(maskValue(v, 0))
+	out, err := json.Marshal(maskValue(v, 0, persist))
 	if err != nil {
 		return "", err
 	}
@@ -72,7 +77,7 @@ func maskPayload(raw []byte) (string, error) {
 	return string(b), err
 }
 
-func maskValue(v any, depth int) any {
+func maskValue(v any, depth int, persist bool) any {
 	if depth > maskDepthLimit {
 		return "[깊이 제한]"
 	}
@@ -89,7 +94,7 @@ func maskValue(v any, depth int) any {
 			// A key that is itself a secret value (sk-..., ghp_...) is replaced; "***",
 			// "***#2", ... keep colliding keys apart.
 			base := k
-			if mcp.LooksSecretValue(k) {
+			if looksSecret(k, persist) {
 				base = masked
 			}
 			name := uniqueKey(m, base)
@@ -97,7 +102,12 @@ func maskValue(v any, depth int) any {
 				m[name] = masked
 				continue
 			}
-			m[name] = maskValue(val, depth+1)
+			// A 40/64-hex value under a commit/rev/sha/digest key is an identifier.
+			if sv, ok := val.(string); ok && !persist && !mcp.LooksSecretKV(k, sv) && mcp.LooksSecretValue(sv) {
+				m[name] = sv
+				continue
+			}
+			m[name] = maskValue(val, depth+1, persist)
 		}
 		return m
 	case []any:
@@ -112,21 +122,28 @@ func maskValue(v any, depth int) any {
 			if s, ok := val.(string); ok && secretFlagRe.MatchString(foldKey(s)) && !strings.Contains(s, "=") {
 				maskNext = true
 			}
-			a[i] = maskValue(val, depth+1)
+			a[i] = maskValue(val, depth+1, persist)
 		}
 		return a
 	case string:
-		return maskString(x)
+		return maskString(x, persist)
 	default: // numbers, bool, nil
 		return v
 	}
 }
 
-func maskString(s string) string {
+func looksSecret(s string, persist bool) bool {
+	if persist {
+		return mcp.LooksSecretPersist(s)
+	}
+	return mcp.LooksSecretValue(s)
+}
+
+func maskString(s string, persist bool) string {
 	if len(s) > MaxStringBytes {
 		s = cutUTF8(s, MaxStringBytes) + truncMark
 	}
-	if mcp.LooksSecretValue(s) {
+	if looksSecret(s, persist) {
 		return masked
 	}
 	s = inlineSecretRe.ReplaceAllString(s, "${1}"+masked)
@@ -194,13 +211,15 @@ func cutUTF8(s string, n int) string {
 	return s
 }
 
-// MaskJSON exposes the masking for callers that want to show a payload (tests, history).
-func MaskJSON(raw []byte) (string, error) { return maskPayload(raw) }
+// MaskJSON exposes the display masking for callers that show a payload (the
+// gateway approval message): paths and labelled identifiers stay readable. Stored
+// payloads always use the strict rule (maskPayload).
+func MaskJSON(raw []byte) (string, error) { return maskPayloadMode(raw, false) }
 
 // MaskText masks secrets inside free text with the same string rules as stored
 // payloads (known credential shapes, `token=...`/`password: ...` regardless of the
 // value length, `--token X`, URL userinfo) for callers that show text to a human.
-func MaskText(s string) string { return maskString(s) }
+func MaskText(s string) string { return maskString(s, false) }
 
 // MaskInline masks only the inline credential patterns of MaskText (`token=...`,
 // `password: ...`, `--token X`, URL userinfo). Unlike MaskText it never replaces a

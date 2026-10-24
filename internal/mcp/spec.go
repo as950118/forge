@@ -130,7 +130,7 @@ func ParseValue(slot, kv string) (Value, error) {
 	if LooksSecret(key) {
 		return Value{}, fmt.Errorf("%s %s: 비밀로 보이는 키에는 literal 값을 저장할 수 없습니다 (평문 저장 금지). %s=${ENV_NAME} 처럼 환경변수 참조를 사용하세요", slotLabel(slot), key, key)
 	}
-	if LooksSecretValue(val) {
+	if LooksSecretKV(key, val) {
 		return Value{}, errValueLooksSecret(slot, key)
 	}
 	return Value{Slot: slot, Key: key, IsSecret: false, RefType: RefLiteral, Literal: val, Display: val}, nil
@@ -205,7 +205,7 @@ func (s *Spec) Validate() error {
 		if v.RefType == RefLiteral && (v.IsSecret || LooksSecret(v.Key)) {
 			return fmt.Errorf("%s %s: 비밀 값은 참조로만 저장할 수 있습니다", slotLabel(v.Slot), v.Key)
 		}
-		if v.RefType == RefLiteral && LooksSecretValue(v.Literal) {
+		if v.RefType == RefLiteral && LooksSecretKV(v.Key, v.Literal) {
 			return errValueLooksSecret(v.Slot, v.Key)
 		}
 	}

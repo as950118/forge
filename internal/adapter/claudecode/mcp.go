@@ -79,7 +79,7 @@ func renderServer(s *mcp.Info) (entry, string) {
 			}
 			out = "${" + v.Ref + "}"
 		case mcp.RefLiteral:
-			if v.IsSecret || mcp.LooksSecret(v.Key) || mcp.LooksSecretValue(v.Literal) || strings.Contains(v.Literal, "${") {
+			if v.IsSecret || mcp.LooksSecret(v.Key) || mcp.LooksSecretKV(v.Key, v.Literal) || strings.Contains(v.Literal, "${") {
 				return entry{}, "렌더 거부: 비밀로 보이는 literal 값 (" + textsafe.Display(v.Key, 60) + ")"
 			}
 			out = v.Literal

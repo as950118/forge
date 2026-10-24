@@ -50,7 +50,7 @@
 | M2 | **악성 도구 설명 (프롬프트 인젝션)** | 게이트웨이는 프록시한 도구 설명을 `listText` 로 정화(한 줄·제어 문자 이스케이프·길이 상한)해서 내보낸다(`internal/gateway/sanitize.go`, 테스트 `TestProxyDescriptionsAreSanitizedInToolsListAndForgeList`). 설명 변경은 아래 M3 로 감지한다. `mcp show` 출력도 정화 | **의미적 인젝션(정상 문장처럼 쓴 악성 지시)은 막지 못한다.** 정화는 터미널·프로토콜 안전만 보장한다 | 0020 |
 | M3 | **rug pull (승인 후 도구 정의 변경)** | `forge mcp approve` 가 현재 캐시된 정의(이름+설명+입력 스키마의 해시와 사본)를 승인 기록(`mcp_tool_approvals`, 마이그레이션 0002)에 저장. 이후 `mcp refresh` 는 **승인된 정의와 비교**해 변경(설명·스키마·추가·삭제)을 경고하고 바뀐 부분(공통 앞뒤를 뺀 구간)만 정화해 보여 준다 — 긴 설명 끝에 덧붙인 지시도 잘리지 않는다. 최초 refresh 는 변경이 아니라 "미승인(신규)". `mcp show` 는 상태(승인됨/변경됨/미승인)와 함께 승인 전에 읽을 **설명 전문**(정화, 최대 1000자 — 표는 70자에서 잘린다)을, `doctor`(`security.mcp`)는 상태를 표시. `mcp pin --enforce` 이면 게이트웨이가 **승인된 정의와 해시가 같은 도구만 노출**하고 나머지는 숨김(`forge_list` 에 이유 표시, 호출도 거부). 테스트: `TestFirstRefreshIsUnapprovedNewNotChange`, `TestApproveThenDetectEachKindOfChange`, `TestSchemaChangeIsDetected`, `TestDescriptionDiffIsSanitized`, `TestLongDescriptionAppendIsNotHiddenByTruncation`, `TestEnforceHidesChangedAndUnapprovedTools`, `TestMCPRefreshApproveShowPinFlow`, `TestMCPShowPrintsFullDescriptionOfUnapprovedTools`, `TestDoctorReportsChangedAndUnapprovedMCP`, `TestMigration0002UpgradePath` | (1) **enforce 는 기본 꺼짐**이고, 꺼져 있으면 변경은 경고만 한다. (2) enforce 는 **게이트웨이 경유(`gateway`) 노출에만** 적용된다. `direct` 로 클라이언트 설정에 렌더링된 서버는 클라이언트가 직접 통신하므로 Forge 가 걸러낼 수 없다(`pin` 이 안내한다). (3) 변경은 **사용자가 `refresh` 를 실행했을 때만** 발견한다 — 자동 주기 갱신이 없고, 게이트웨이는 호출 때 업스트림 `tools/list` 를 다시 비교하지 않는다(캐시 기준). 서버가 같은 도구 이름으로 동작만 바꾸는 것은 정의가 같으면 탐지되지 않는다. (4) 승인 기록은 DB 에 있어 DB 쓰기 권한자는 바꿀 수 있다. (5) 비밀 값 마스킹 때문에 비밀만 바뀐 경우는 변경으로 보이지 않는다 | 0017, 0020 |
 | M4 | **환경변수 유출** (부모 셸의 API 키가 자식 서버로) | 자식 프로세스 환경 = `mcp.MinimalEnv` 허용 목록 + 서버에 선언한 `--env` 변수만(`internal/mcp/connect.go`). 자격증명이 든 프록시 URL 변수는 통째로 버림. 미리보기가 "최소 환경 + 선언한 변수만" 과 선언 변수 이름을 표시. 테스트: `TestRefreshDoesNotInheritParentEnv`, `TestMinimalEnvDropsCredentialBearingValues`, `TestDefaultProxyEnvDropsCredentialVariables`, `TestPreviewNeverShowsValues` | 선언한 비밀은 **그 서버에 전달된다**(설계). 서버가 다른 곳으로 보내는 것은 막지 못한다. 스킴 없는 `user:pw@host` 프록시 값은 판정하지 못한다 | 0020(AC-1) |
-| M5 | **비밀 평문 저장·출력** | env·헤더는 `${ENV}` 참조만 저장, 비밀로 보이는 키 이름·값 패턴·URL 쿼리·`--` 뒤 인자의 literal 은 저장 거부(우회 옵션 없음)(`internal/mcp/spec.go`, `secrets.go`). 발견 결과(도구 이름·설명·스키마·서버 정보)는 해석된 비밀을 `***` 로 치환한 뒤 캐시. 미리보기·승인 기록에는 참조 이름만 나오고 literal 값은 "값 비표시". 테스트: `TestNoPlaintextSecretInDB`, `TestParseValue`, `TestValidateURLValuePatterns`, `TestCheckArgs`, `TestRefreshMasksSecretsInCache`, `TestPreviewNeverShowsValues` | 마스킹은 **휴리스틱**이다: 비밀스럽지 않은 이름과 토큰처럼 보이지 않는 짧은 값(`q="hunter2"`), 동형 문자·결합 문자 우회, base64/URL 인코딩 에코는 놓칠 수 있다. 리터럴로 선언한 값은 비밀로 보지 않는다. keychain 참조는 미지원 | 0017, 0019, 0020 |
+| M5 | **비밀 평문 저장·출력** | env·헤더는 `${ENV}` 참조만 저장, 비밀로 보이는 키 이름·값 패턴·URL 쿼리·`--` 뒤 인자의 literal 은 저장 거부(우회 옵션 없음)(`internal/mcp/spec.go`, `secrets.go`). 발견 결과(도구 이름·설명·스키마·서버 정보)는 해석된 비밀을 `***` 로 치환한 뒤 캐시. 미리보기·승인 기록에는 참조 이름만 나오고 literal 값은 "값 비표시". **오탐 완화(TASK-0026)**: 파일 경로 모양의 값(`/`·`~/`·`./`·`../`·드라이브로 시작, 구성요소 2개 이상, URL 아님)에는 순수 고엔트로피 규칙을 적용하지 않고(macOS `TMPDIR`·npx/pnpm 캐시·해시 디렉터리), 알려진 비밀 접두는 경로의 모든 구성요소에서 계속 검사한다. 문맥이 분명한 식별자(`sha256:<64hex>`, `--ref`/`commit=` 등 뒤의 40·64자 hex, UUID, 짧은 단어로 된 긴 snake/kebab-case)도 비밀로 보지 않는다. URL 의 경로·쿼리·프래그먼트는 파일 경로가 아니므로 예외 없이 엄격하고, **ledger payload 처럼 영구 저장되는 마스킹도 예외 없는 엄격 모드**다(아래 "경로·식별자 예외" 절). 테스트: `TestNoPlaintextSecretInDB`, `TestParseValue`, `TestValidateURLValuePatterns`, `TestCheckArgs`, `TestRefreshMasksSecretsInCache`, `TestPreviewNeverShowsValues`, `TestCorpusRegistration`, `TestCorpusText`, `TestPathExceptionKeepsKnownPrefixChecks`, `TestURLPartsStayStrictEvenWhenPathShaped`, `TestIdentifierContextExceptions`, `TestMCPAddAcceptsMacOSTempDirArgument`, `TestStoredPayloadMasksRandomPathComponent`, `TestPrefixPositionAndCaseRules`, `TestRandomAbsoluteComponentsAreNotAPath`, `TestWordIdentifierShape` | 마스킹은 **휴리스틱**이다: 비밀스럽지 않은 이름과 토큰처럼 보이지 않는 짧은 값(`q="hunter2"`), 동형 문자·결합 문자 우회, base64/URL 인코딩 에코는 놓칠 수 있다. 리터럴로 선언한 값은 비밀로 보지 않는다. keychain 참조는 미지원. **경로 구성요소에 접두 없이 박힌 비밀·`commit=<API 키>` 같은 라벨 위장·끝 숫자가 붙은 단어형 암호문구는 통과한다**(아래 절) | 0017, 0019, 0020 |
 | M6 | **SSRF** (도구·MCP 가 사설 주소·메타데이터 주소로 요청) | 커스텀 `http` 도구: 사설·루프백·링크 로컬 주소 거부를 등록 시와 **연결 시점**(DNS 해석 결과, 리다이렉트 포함)에 적용(`internal/tool/http.go`). 테스트: `TestHTTPSSRFLiteralIPsRefusedAtAdd`, `TestHTTPSSRFEnforcedAtConnectTime`, `TestHTTPSSRFDNSResolvingToPrivate`, `TestHTTPRedirectToInternalIsBlocked`, `TestRedirectDowngradeStripsDefinitionHeaders`. 원격 MCP URL: 미리보기가 평문 http·사설/링크 로컬 IP·내부망 이름을 경고(`TestPreviewRemote`) | **등록한 원격 MCP URL 에는 연결 시점 SSRF 필터가 없다** — 사용자가 직접 지정한 서버로 보고 미리보기 경고에만 의존한다. 미리보기는 DNS 를 해석하지 않으므로 공개 이름이 사설 주소로 해석되는 경우는 알리지 못한다 | 0020 |
 
 ### 3.3 커스텀 도구와 게이트웨이
@@ -87,6 +87,45 @@
 - **TOCTOU**: 해시·경로 검사와 실제 사용 사이의 교체(스킬 저장소 검증, PATH 바이너리, sync 적용 직전)는 막지 못한다.
 - **OS 별 차이**: 하드링크·inode 판정, 파일 잠금, 권한 비트 검사는 POSIX 기준이다. ACL 은 보지 않는다.
 - **이번 변경으로 고친 이전 후속 항목**: `forge mcp show` 의 도구 이름·설명 정화(TASK-0020 AC-8 의 해당 부분).
+
+### 비밀 값 규칙의 경로·식별자 예외와 잔여 위험 (TASK-0026)
+
+같은 규칙(`internal/mcp/secrets.go`)을 쓰되 **맥락을 셋으로 나눈다.** 오탐(`***` 로 가려짐)의 비용은 일시 표시에서만 크고, 영구 저장 데이터의 미탐은 영구 노출이기 때문이다.
+
+| 호출 지점 | 맥락 | 정책 |
+|-----------|------|------|
+| `mcp add` 인자(`CheckArgs`)·`tool add` argv·본문 템플릿 | 등록 거부(평문 저장 방지) | 경로·식별자 예외 적용. `--ref <hex>` 처럼 앞 인자가 라벨이면 그 인자도 예외 |
+| `mcp add --env/--header`·`tool add --env/--header`(`ParseValue`, `Validate`) | 등록 거부 | 예외 적용. 키 이름이 commit/rev/ref/sha/hash/digest/checksum 이고 값이 40·64자 hex 면 식별자 |
+| 어댑터 렌더(`claude-code`·`opencode` literal 값) | 등록과 같은 판정 | 등록된 값이 렌더에서 거부되지 않도록 같은 키 인식 규칙(`LooksSecretKV`) |
+| 스크립트 본문 줄(`tool add --script-file`) | 등록 거부 | 예외 적용(공백으로 나뉜 필드 단위) |
+| `mcp add --url`(경로·쿼리·프래그먼트), `://` 가 든 모든 필드 | 등록·표시 | **예외 없음(엄격).** URL 은 파일 경로가 아니다 |
+| **ledger payload(hook·게이트웨이 이력, `record_payload=1`)** | **영구 저장** | **엄격 모드(`LooksSecretPersist`)**: 경로·식별자 예외 없음. 읽기 불편해도 경로 구성요소의 고엔트로피 값과 라벨 붙은 hex 도 가린다 |
+| 게이트웨이 승인 메시지, 미리보기·diff·doctor 표시, 도구 dry-run 표시(`MaskText`·`MaskJSON`·`adapter.MaskLine`) | 일시 표시 | 경로·식별자 예외 적용(경로를 `***` 로 가리면 읽을 수 없다). 알려진 접두·`token=`·URL userinfo 는 계속 마스킹 |
+
+**경로로 보는 값**: `~/`, `./`, `../`, `node_modules/`, Windows 드라이브(`C:\`)로 시작하거나, `/` 로 시작하면서 **첫 구성요소가 흔한 루트 이름**(`Users home var private tmp opt usr etc Library Applications System Volumes mnt srv root proc dev run nix snap bin sbin lib lib64 cache data workspace app src build work`)인 값. 구성요소 2개 이상, 경로에 허용되는 문자만, `://` 없음. `/<무작위>/<무작위>`·`/v1/<무작위>/mcp` 는 경로가 아니므로 엄격하게 검사한다. 공백이 든 경로(`/Library/Application Support/...`)는 필드가 나뉘어 경로로 인식되지 않는다(남은 오탐).
+
+**알려진 비밀 접두(모든 맥락·경로의 모든 구성요소, 대소문자 무시)**: 경계(구성요소 시작 또는 `._-/:=@` 뒤)에서 `sk-`/`sk_`·`ghp_ gho_ ghu_ ghs_ ghr_`·`AKIA`/`ASIA`·`AIza`·`eyJ`·`npm_`·`hf_`·`ya29.`·SendGrid `SG.<..>.<..>`·Twilio `SK<32hex>`·Bearer/Basic. 고유한 접두는 **구성요소 중간 어디서나**(`prefixghp_...`): `github_pat_`·`gh?_`(꼬리 30자 이상)·`xox[abprs]-`·`xapp-`·`glpat-`·`glsa_`·`sk-ant-`·`sk-proj-`·`sk_live_`/`rk_live_`/`rk_test_`/`sk_test_`/`pk_live_`/`pk_test_`·`whsec_`·`shpat_ shpss_ shpca_ shppa_`·`dop_v1_`. 짧은 접두(`npm_`, `hf_`, `sk-`, `SG.`)는 경계 뒤에서만 본다(`pnpm_store` 같은 이름이 걸리지 않게). `token=`·`password=` 같은 키-값 구성요소도 경로 안에서 검사한다.
+
+예외 규칙과 자체 공격 평가:
+
+- **라벨 예외**: 키/플래그 이름의 마지막 단어가 commit/rev/ref/sha/sha1/sha256/hash/digest/checksum 이고 값이 정확히 40·64자 hex 이거나 `sha256:<64hex>` 일 때만. 32자·그 외 길이·무라벨 hex·`COMMIT_TOKEN` 같은 비밀 단어 키는 계속 거부.
+- **식별자 예외**: `_`·`-` 로 나눈 3개 이상, 2~12자 소문자 단어(모음 있고 자음 4연속 없음) 3개 이상. **숫자는 마지막 부분의 버전 꼴(`v2`, `2024`, `rc1`)이거나 마지막 단어 바로 앞의 `v<N>`(`..._v2_final`)에만** 허용하고, 그 밖의 위치에 숫자가 섞이면 식별자로 보지 않는다(단어에 숫자를 섞은 암호문구는 거부).
+- 32자 이상 hex(철자·숫자 혼합)는 엔트로피와 무관하게 비밀로 본다. 40자 base64 모양(AWS 비밀 키 형태)도 잡는다.
+- 코퍼스(`internal/mcp/secretcorpus`, 시드 고정 가짜 값)에서 **예외로 새로 통과하는 가짜 비밀은 0건**이고, 아래 잔여 위험은 코퍼스에서 따로 집계해 시험으로 고정했다(`TestResidualRisksOfTheExceptions`).
+
+**잔여 위험(미탐 가능성, 등록 맥락)** — 미탐이 0 이라는 뜻이 아니다. 정직하게 적는다:
+
+1. **경로 구성요소의 접두 없는 비밀은 통과**한다. 대상은 알려진 루트 31개(`Users home var private tmp opt usr etc Library Applications System Volumes mnt srv root proc dev run nix snap bin sbin lib lib64 cache data workspace app src build work`) 아래뿐 아니라 `~/`, `./`, `../`, `node_modules/`, 드라이브(`C:\`, `D:/`) 아래도 포함한다. 독립 시험에서 `/tmp/<무작위 40자>` 는 3000/3000 통과했다. 루트 집합이 넓어 사실상 대부분의 실제 절대 경로가 해당한다. **영구 저장 데이터(ledger payload)는 엄격 모드라 이런 값도 가려진다.**
+2. **라벨 위장**: `commit=<API 키 40자 hex>`, `--ref <hex>`, `GIT_COMMIT=<64자 hex>`, `sha256:<64자 hex>`, `my-sha=<hex>`, `--api-hash <hex>`, `digest=<hex>`, `--sha256 <hex>` 처럼 라벨이 붙은 40·64자 hex 비밀은 통과한다.
+3. **단어형 암호문구**: 숫자 없는 단어 암호문구(`correct-horse-battery-staple`)는 원래부터 통과한다. 여기에 **끝 숫자를 붙인 암호문구(`a-b-c-d-1234`)도 약 99% 통과**한다(독립 시험 1981/2000). `release-2024`·`image-name-2024` 같은 정상 식별자와 구별할 수 없어 택한 절충이다. 중간 숫자나 단어 안에 섞인 숫자는 거부한다(수정 전 수준). 발음 가능한 합성 토큰도 구별되지 않는다.
+4. **짧은 접두를 앞 글자에 붙이면 통과**한다: `sk-`, `npm_`, `hf_`, `SG.`, `ya29.`, `eyJ`, `AIza`, `AKIA` 는 경계(구성요소 시작 또는 `._-/:=@` 뒤)에서만 본다. 이는 `pnpm_store`, `risk-model`, `task-runner` 같은 정상 이름을 거부하지 않으려는 의도된 설계다. 긴 고유 접두(`github_pat_`, `whsec_`, `sk_live_`, `prefixghp_...` 의 `ghp_`+긴 꼬리 등)는 구성요소 중간에서도 거부한다.
+5. **40자 base64 규칙의 한계**: 정확히 40자이고 `/` 또는 `+` 를 포함하며 엔트로피 4.0 이상인 값만 잡는다(AWS 비밀 키 모양). 이 규칙은 등록 맥락 기준이며, 저장 맥락에서도 가려지지 않는 경우가 있다(HEAD 와 같은 기존 한계, 독립 시험 6건). 다른 길이의 base64 키, 접두 없는 24자 미만 키도 원래부터 못 잡는다.
+6. **좁은 범위**: HTTP body 템플릿·스크립트 본문·JSON 텍스트처럼 경로가 공백으로 구분된 독립 필드가 아니라 따옴표·`":"` 로 붙어 있으면(`{"p":"/tmp/..."}`, `--out="/x"`) 경로 예외가 적용되지 않는다. 오탐이 늘 뿐 미탐은 늘지 않는다.
+7. **남은 오탐(안전한 쪽)**: 집합 밖 루트의 정상 파일 경로(`/mydata/<무작위>/...`), 공백이 든 경로(`/Library/Application Support/<24자>/...`, 독립 시험 10건)는 계속 거부된다. `git+https://...#<sha>` 는 URL 엄격 정책상 의도된 거부다(6건).
+
+**독립 측정 요약**(Verifier 코퍼스: 가짜 비밀 340·정상 386, 고정 시드): 인자 재현율 HEAD 95.3% → 95.6%, 정밀도 62.3% → 95.3%, 정상 오탐 196 → 16, 저장 맥락 재현율 98.2%, 순수 무작위 약 5.5만 개 중 새로 통과한 것 0건. 재현율이 100% 가 아닌 것은 위 잔여 위험 때문이다.
+
+- **사용자 안내**: 경로·식별자에 비밀을 넣지 말고 비밀은 항상 `--env KEY='${ENV_NAME}'`·`--header 'Authorization=${ENV_NAME}'` 참조로 넣는다. 인자로만 받는 서버는 환경변수를 읽어 실행하는 래퍼 스크립트를 등록한다.
 
 ## 5. 사용자가 해야 할 일 (체크리스트)
 

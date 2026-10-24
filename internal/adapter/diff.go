@@ -415,6 +415,7 @@ func unescapeJSONString(content string) string {
 type masker struct {
 	json     bool
 	maskNext bool
+	prevLit  string // last string literal of the previous line (a flag like --ref or a key)
 }
 
 func newMasker(isJSON bool) *masker { return &masker{json: isJSON} }
@@ -450,14 +451,35 @@ func (m *masker) line(s string) string {
 			m.maskNext = true
 		}
 	}
-	return strLitRe.ReplaceAllStringFunc(s, func(lit string) string {
+	// String literals are checked one by one. A 40/64-hex literal is an identifier
+	// when it is the value of a commit/rev/sha/digest key ("commit": "...") or follows
+	// a --ref/--rev/--sha256 flag element (the flag may end the previous line).
+	var b strings.Builder
+	last, prev := 0, m.prevLit
+	m.prevLit = ""
+	for _, loc := range strLitRe.FindAllStringIndex(s, -1) {
+		b.WriteString(s[last:loc[0]])
+		lit := s[loc[0]:loc[1]]
 		inner := lit[1 : len(lit)-1]
-		if wholeRef.MatchString(inner) || hashRe.MatchString(inner) { // sha256 digests are not secrets
-			return lit
+		isValue := strings.HasPrefix(strings.TrimSpace(s[last:loc[0]]), ":")
+		last = loc[1]
+		switch {
+		case wholeRef.MatchString(inner) || hashRe.MatchString(inner): // sha256 digests are not secrets
+			b.WriteString(lit)
+		case isValue && prev != "" && !mcp.LooksSecretKV(prev, inner):
+			b.WriteString(lit)
+		case !isValue && prev != "" && !mcp.LooksSecretAfter(prev, inner):
+			b.WriteString(lit)
+		case mcp.LooksSecretValue(inner):
+			b.WriteString(`"` + maskedValue + `"`)
+		default:
+			b.WriteString(`"` + ledger.MaskInline(inner) + `"`)
 		}
-		if mcp.LooksSecretValue(inner) {
-			return `"` + maskedValue + `"`
-		}
-		return `"` + ledger.MaskInline(inner) + `"`
-	})
+		prev = inner
+	}
+	b.WriteString(s[last:])
+	if last > 0 {
+		m.prevLit = prev
+	}
+	return b.String()
 }
