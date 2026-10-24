@@ -6,7 +6,7 @@ DATE     ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS  := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 TARGETS  := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
 
-.PHONY: build test lint fmt check-schema release-snapshot clean
+.PHONY: build test lint fmt check-schema release-snapshot clean demo docs-check quickstart-check
 
 build:
 	@mkdir -p dist
@@ -38,3 +38,18 @@ release-snapshot:
 
 clean:
 	rm -rf dist
+
+# Local demo in a fully isolated temp HOME/FORGE_HOME/project with fake claude/opencode
+# binaries (scripts/demo/demo.sh). Never touches ~/.forge or real clients, no model calls.
+demo: build
+	FORGE_BIN="$(CURDIR)/dist/$(BINARY)" bash scripts/demo/demo.sh
+
+# Static check of README.md and docs/: links, forge subcommands/flags that exist,
+# invisible characters, no local-only paths. Does not execute the documented commands.
+docs-check: build
+	FORGE_BIN="$(CURDIR)/dist/$(BINARY)" bash scripts/docs-check.sh
+
+# Runs the commands of docs/guide/quickstart.md (and the two client guides, including their
+# `make build` step) for real, in an isolated temp HOME/FORGE_HOME/project with fake claude/opencode; prints timings.
+quickstart-check:
+	bash scripts/quickstart-check.sh
