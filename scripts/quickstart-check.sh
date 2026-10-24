@@ -53,31 +53,14 @@ REAL_STAT_BEFORE="$(real_forge_stat)"
 GOMOD_BEFORE="$(cd "$REPO_ROOT" && git diff --stat -- go.mod go.sum | wc -l | tr -d ' ')"
 
 
-# Known limitation: forge's secret heuristic can mistake a long random-looking path
-# component (24+ chars of [A-Za-z0-9_], e.g. macOS /var/folders/xx/<random>/T) in a
-# command ARGUMENT for a secret and refuse `forge mcp add ... -- python3 <path>`.
-# So the temp root is short (/tmp by default) and long components are refused early.
-check_path_components() { # check_path_components <label> <path>
-  local c old_ifs="$IFS"
-  IFS=/
-  for c in $2; do
-    if [ "${#c}" -ge 24 ] && printf '%s' "$c" | grep -Eq '^[A-Za-z0-9_]+$'; then
-      IFS="$old_ifs"
-      echo "중단: $1 경로에 무작위 문자열처럼 보이는 긴 구성요소가 있습니다: $c" >&2
-      echo "      비밀 탐지 휴리스틱이 경로 인자를 비밀로 오탐해 등록을 거부할 수 있습니다(알려진 한계, 이슈 기록됨)." >&2
-      echo "      더 짧은 경로를 쓰세요(예: FORGE_DEMO_TMPDIR=/tmp)." >&2
-      exit 2
-    fi
-  done
-  IFS="$old_ifs"
-}
-check_path_components "저장소" "$REPO_ROOT"
+# The temp root stays under /tmp (not $TMPDIR) so the run is short-path and
+# reproducible; long random paths such as the macOS default TMPDIR work too (the
+# secret heuristic no longer mistakes file-path arguments for secrets, TASK-0026).
 # Short, TMPDIR-independent root (override with FORGE_QC_TMPDIR).
 QC_BASE="${FORGE_QC_TMPDIR:-/tmp}"
 [ -d "$QC_BASE" ] || { echo "중단: 임시 디렉터리 기준 경로가 없습니다: $QC_BASE" >&2; exit 2; }
 ROOT="$(mktemp -d "$QC_BASE/forge-qc.XXXXXX")"
 ROOT="$(cd "$ROOT" && pwd -P)"
-check_path_components "임시 루트" "$ROOT"
 chmod 700 "$ROOT"
 
 cleanup() {

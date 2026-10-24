@@ -584,7 +584,7 @@ func (d *Definition) validateValues() error {
 			if v.IsSecret || mcp.LooksSecret(v.Key) {
 				return fmt.Errorf("%s: 비밀 값은 참조(${ENV})로만 저장할 수 있습니다", v.Key)
 			}
-			if mcp.LooksSecretValue(v.Literal) {
+			if mcp.LooksSecretKV(v.Key, v.Literal) {
 				return fmt.Errorf("%s: 값이 비밀처럼 보여 literal 로 저장할 수 없습니다 (평문 저장 금지). %s=${ENV_NAME} 참조를 사용하세요", v.Key, v.Key)
 			}
 		case mcp.RefEnv:
