@@ -1,6 +1,6 @@
 # Forge 프로젝트 계획
 
-> 상태: Draft v0.1 · 2026-10-21 · 태스크는 `.company-os/tasks/` 에서 관리한다.
+> 상태: Draft v0.1 · 2026-10-21 · 구현 현황은 [README](../README.md) 를 참고한다(이 문서는 설계 계획이며 구현과 어긋난 부분이 있을 수 있다).
 
 ## 1. 목표
 
@@ -94,18 +94,20 @@ forge doctor                                  # 클라이언트 설정·드리�
 
 ## 4. 마일스톤
 
-| 마일스톤 | 내용 | 완료 기준 |
-|----------|------|-----------|
-| **M0 기반** | 레포 구조, 데이터 모델 ADR, CLI 형식 검증 스파이크 | 클라이언트별 설정 형식이 문서로 확정, 스키마 v1 합의 |
-| **M1 스킬** | 스킬 가져오기·검증·버전·활성화 | `forge skill add ./dir` 후 Claude Code에서 스킬이 보임 |
-| **M2 MCP** | MCP 서버 등록·발견·캐시·클라이언트별 노출 | 등록한 MCP의 `tools/list` 가 캐시되고 sync로 설정에 반영 |
-| **M3 도구 + 게이트웨이** | command/script/http 도구, `forge mcp serve` | CLI에 Forge 하나만 등록해도 도구·MCP·스킬 조회가 동작 |
-| **M4 이력** | 원장, hook/게이트웨이 수집, 조회·집계, miss 목록 | `forge history --since 7d` 가 스킬/도구/MCP별 호출 수를 보여줌 |
-| **M5 동기화·프로필** | 어댑터 완성, 프로필, doctor, 드리프트 감지 | 프로필 전환 한 번으로 두 CLI 설정이 일관되게 바뀜 |
-| **M6 웹 UI (선택)** | 로컬 대시보드(스킬/도구/MCP/이력) | ARTEX 시스템·기록 화면에 대응하는 읽기/편집 화면 |
-| **M7 팀 공유 (선택)** | git 기반 레지스트리 공유, 위험 명령 차단 규칙 | 팀 레포에서 `forge sync` 로 동일 구성 재현 |
+| 마일스톤 | 내용 | 완료 기준 | 구현 상태 |
+|----------|------|-----------|-----------|
+| **M0 기반** | 레포 구조, 데이터 모델 ADR, CLI 형식 검증 스파이크 | 클라이언트별 설정 형식이 문서로 확정, 스키마 v1 합의 | 구현됨 |
+| **M1 스킬** | 스킬 가져오기·검증·버전·활성화 | `forge skill add ./dir` 후 Claude Code에서 스킬이 보임 | 구현됨 |
+| **M2 MCP** | MCP 서버 등록·발견·캐시·클라이언트별 노출 | 등록한 MCP의 `tools/list` 가 캐시되고 sync로 설정에 반영 | 구현됨 |
+| **M3 도구 + 게이트웨이** | command/script/http 도구, `forge mcp serve` | CLI에 Forge 하나만 등록해도 도구·MCP·스킬 조회가 동작 | 구현됨 |
+| **M4 이력** | 원장, hook/게이트웨이 수집, 조회·집계, miss 목록 | `forge history --since 7d` 가 스킬/도구/MCP별 호출 수를 보여줌 | 구현됨 |
+| **M5 동기화·프로필** | 어댑터 완성, 프로필, doctor, 드리프트 감지 | 프로필 전환 한 번으로 두 CLI 설정이 일관되게 바뀜 | 구현됨 |
+| **M6 웹 UI (선택)** | 로컬 대시보드(스킬/도구/MCP/이력) | ARTEX 시스템·기록 화면에 대응하는 읽기/편집 화면 | 미구현 |
+| **M7 팀 공유 (선택)** | git 기반 레지스트리 공유, 위험 명령 차단 규칙 | 팀 레포에서 `forge sync` 로 동일 구성 재현 | 미구현 |
 
 M0 → M1 → M2 → M3 → M4 순으로 진행하고, M5는 M1~M2 와 병행 가능하다. M6·M7은 v1 이후.
+
+> "구현됨" 은 임시 `HOME`/`FORGE_HOME` 환경에서의 검증 기준이다. 완료 기준 중 "실제 Claude Code/OpenCode 에서 보임" 은 아직 검증하지 못했다.
 
 ## 5. 리스크와 열린 질문
 
@@ -119,10 +121,8 @@ M0 → M1 → M2 → M3 → M4 순으로 진행하고, M5는 M1~M2 와 병행 �
 | Q2 | 1차 지원 클라이언트 범위 | Claude Code + OpenCode 로 시작, Codex·Gemini CLI 는 어댑터 인터페이스 확인 후 |
 | Q3 | 웹 UI 필요 시점 | M4 이후 사용 패턴을 보고 결정 |
 
-## 6. 태스크 관리
+## 6. 작업 관리
 
-- 도구: `company-os-cli` (`company-os init` 으로 스캐폴드, `.company-os/tasks/TASK-NNNN.md`)
-- 인덱스: `.company-os/tasks/README.md` 표
-- 워크플로: `create-feature` (PM → Architect → Backend → Reviewer → QA → Release), 상태: Backlog → Ready → In Progress → In Review → QA → Done
-- 초기 백로그는 마일스톤별로 TASK-0001 ~ 에 등록되어 있다.
+- 태스크 이력은 개발자 로컬에서 관리하며 저장소에는 포함하지 않는다(git 제외).
+- 마일스톤 단위 구현 현황은 [README](../README.md) 의 로드맵을 따른다.
 - 작업 방식(서브 에이전트 Worker/Verifier 분리, 메인은 결과 보고)은 [`CLAUDE.md`](../CLAUDE.md)의 그라운드 룰을 따른다.
