@@ -59,7 +59,7 @@ func desiredHooks(bin string) ([]hookDef, error) {
 				if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Type != "command" || parsed.Command == "" {
 					return nil, fmt.Errorf("hook 스니펫 형식이 예상과 다릅니다")
 				}
-				hash, err := hashJSON(raw)
+				hash, err := adapter.HashJSON(raw)
 				if err != nil {
 					return nil, err
 				}
@@ -228,15 +228,15 @@ func updateHandler(src []byte, event, matcher, command string, h jsonedit.Obj) (
 }
 
 func (pl *planner) planHooks() error {
-	if pl.req.NoHooks {
+	if pl.Req.NoHooks {
 		// --no-hooks: no install, update or removal; settings.json is not even opened.
-		pl.plan.Notes = append(pl.plan.Notes, "--no-hooks: hook 설치/갱신을 건너뜁니다 (이미 설치된 관리 hook 은 그대로 둡니다; 제거하려면 --remove-hooks)")
+		pl.Plan.Notes = append(pl.Plan.Notes, "--no-hooks: hook 설치/갱신을 건너뜁니다 (이미 설치된 관리 hook 은 그대로 둡니다; 제거하려면 --remove-hooks)")
 		return nil
 	}
 	var want []hookDef
-	if !pl.req.RemoveHooks {
+	if !pl.Req.RemoveHooks {
 		var err error
-		if want, err = desiredHooks(pl.bin()); err != nil {
+		if want, err = desiredHooks(pl.Bin()); err != nil {
 			return err
 		}
 	}
@@ -245,7 +245,7 @@ func (pl *planner) planHooks() error {
 		desired[h.key()] = h
 	}
 	var stale []adapter.StateItem
-	for _, si := range pl.state.Items {
+	for _, si := range pl.State.Items {
 		if si.Kind != adapter.KindHook {
 			continue
 		}
@@ -256,12 +256,12 @@ func (pl *planner) planHooks() error {
 	if len(want) == 0 && len(stale) == 0 {
 		return nil // nothing to do: settings.json is not even opened
 	}
-	doc, err := loadDoc(pl.p.root, pl.p.settings, pl.newSettingsMode())
+	doc, err := adapter.LoadDoc(pl.p.Root, pl.p.settings, pl.newSettingsMode())
 	if err != nil {
 		return err
 	}
-	if doc.exists {
-		root, _ := jsonedit.Parse(doc.cur)
+	if doc.Exists {
+		root, _ := jsonedit.Parse(doc.Cur)
 		if hk, ok, err := root.Get("hooks"); err != nil {
 			return fmt.Errorf("%s: %w", textsafe.Display(pl.p.settings, 200), err)
 		} else if ok && hk.Kind != jsonedit.Object {
@@ -272,9 +272,9 @@ func (pl *planner) planHooks() error {
 	label := func(h hookDef) string { return h.event }
 	path := pl.p.settings
 	blocked := func(it adapter.Item) bool {
-		if doc.blocked != "" {
-			it.Action, it.Reason, it.Overridable = adapter.ActionConflict, doc.blocked, false
-			pl.item(it)
+		if doc.Blocked != "" {
+			it.Action, it.Reason, it.Overridable = adapter.ActionConflict, doc.Blocked, false
+			pl.Item(it)
 			return true
 		}
 		return false
@@ -286,64 +286,61 @@ func (pl *planner) planHooks() error {
 		b, err := f()
 		if err != nil {
 			it.Action, it.Reason = adapter.ActionConflict, "settings.json 구조가 예상과 달라 편집할 수 없습니다: "+textsafe.Display(err.Error(), 160)
-			pl.item(it)
+			pl.Item(it)
 			return false
 		}
-		doc.cur = b
+		doc.Cur = b
 		it.Action, it.Reason = a, reason
-		pl.item(it)
+		pl.Item(it)
 		return true
 	}
 	for _, si := range stale {
 		ev, matcher, command, ok := parseHookKey(si.Name)
 		it := adapter.Item{Kind: adapter.KindHook, Name: ev, Path: path}
 		if !ok {
-			pl.state.Remove(adapter.KindHook, si.Name)
-			pl.plan.Notes = append(pl.plan.Notes, "상태 파일의 올바르지 않은 hook 항목을 무시하고 정리합니다")
+			pl.State.Remove(adapter.KindHook, si.Name)
+			pl.Plan.Notes = append(pl.Plan.Notes, "상태 파일의 올바르지 않은 hook 항목을 무시하고 정리합니다")
 			continue
 		}
-		loc, err := findHandler(doc.cur, ev, matcher, command)
+		loc, err := findHandler(doc.Cur, ev, matcher, command)
 		if err != nil {
 			return err
 		}
 		if !loc.found {
 			it.Action, it.Reason = adapter.ActionSkip, "이미 없음: 상태 항목만 정리"
-			pl.item(it)
-			pl.state.Remove(adapter.KindHook, si.Name)
+			pl.Item(it)
+			pl.State.Remove(adapter.KindHook, si.Name)
 			continue
 		}
-		cur, _ := hashJSON(loc.raw)
-		if pl.jitems[adapter.KindHook+"\x00"+si.Name].Hash == cur {
-			si.Hash = cur // written by a killed sync (see adopt)
-		}
-		if cur != si.Hash && !pl.req.ForceManaged {
+		cur, _ := adapter.HashJSON(loc.raw)
+		if pl.ManagedModified(adapter.KindHook, si, cur) && !pl.Req.ForceManaged {
 			it.Action, it.Reason, it.Overridable = adapter.ActionConflict, "제거 대상 관리 hook 이 수정되었습니다 (해시 불일치). 지우려면 --force-managed (백업됨)", true
-			pl.item(it)
+			pl.Item(it)
 			continue
 		}
 		reason := "더 이상 필요 없는 관리 hook 제거 (handler 단위)"
-		if pl.req.RemoveHooks {
+		if pl.Req.RemoveHooks {
 			reason = "--remove-hooks: 관리 hook 제거 (handler 단위)"
 		}
-		if apply(it, func() ([]byte, error) { return removeHandler(doc.cur, ev, matcher, command) }, adapter.ActionRemove, reason) {
-			pl.state.Remove(adapter.KindHook, si.Name)
+		if apply(it, func() ([]byte, error) { return removeHandler(doc.Cur, ev, matcher, command) }, adapter.ActionRemove, reason) {
+			pl.State.Remove(adapter.KindHook, si.Name)
 		}
 	}
 	for _, h := range want {
 		it := adapter.Item{Kind: adapter.KindHook, Name: label(h), Path: path}
-		loc, err := findHandler(doc.cur, h.event, h.matcher, h.command)
+		loc, err := findHandler(doc.Cur, h.event, h.matcher, h.command)
 		if err != nil {
 			return err
 		}
-		st := pl.state.Find(adapter.KindHook, h.key())
+		st := pl.State.Find(adapter.KindHook, h.key())
 		if loc.found {
-			if hh, herr := hashJSON(loc.raw); herr == nil {
-				st = pl.adopt(adapter.KindHook, h.key(), hh)
+			if hh, herr := adapter.HashJSON(loc.raw); herr == nil {
+				st = pl.Adopt(adapter.KindHook, h.key(), hh)
 			}
 		}
 		install := func(a adapter.Action, reason string) {
-			if apply(it, func() ([]byte, error) { return installHandler(doc.cur, h.event, h.matcher, h.handler) }, a, reason) {
-				pl.state.Upsert(adapter.KindHook, h.key(), h.hash, pl.now)
+			if apply(it, func() ([]byte, error) { return installHandler(doc.Cur, h.event, h.matcher, h.handler) }, a, reason) {
+				pl.State.Upsert(adapter.KindHook, h.key(), h.hash, pl.Now)
 			}
 		}
 		switch {
@@ -352,48 +349,49 @@ func (pl *planner) planHooks() error {
 		case !loc.found:
 			install(adapter.ActionAdd, "관리 hook 이 없어 다시 추가")
 		case st == nil:
-			cur, _ := hashJSON(loc.raw)
+			cur, _ := adapter.HashJSON(loc.raw)
 			why := "내용은 다릅니다"
 			if cur == h.hash {
 				why = "내용은 동일합니다"
 			}
 			reason := "사용자가 만든 같은 command 의 hook 이 있어 건드리지 않습니다 (" + why + "; Forge 관리 대상 아님)"
-			if pl.journalListed(adapter.KindHook, h.key()) {
+			if pl.JournalListed(adapter.KindHook, h.key()) {
 				reason = "중단된 이전 sync 가 쓴 hook 이지만 그 뒤 내용이 수정되어 관리 항목으로 인정하지 않습니다 (" + why + ")"
 			}
 			it.Action, it.Reason = adapter.ActionConflict, reason
-			pl.item(it)
+			pl.Item(it)
 		default:
-			cur, _ := hashJSON(loc.raw)
+			cur, _ := adapter.HashJSON(loc.raw)
+			modified := pl.ManagedModified(adapter.KindHook, *st, cur)
 			switch {
-			case cur != st.Hash && !pl.req.ForceManaged:
+			case modified && !pl.Req.ForceManaged:
 				it.Action, it.Reason, it.Overridable = adapter.ActionConflict, "관리 hook 이 손으로 수정되었습니다 (해시 불일치). 덮어쓰려면 --force-managed (백업됨)", true
-				pl.item(it)
+				pl.Item(it)
 			case cur == h.hash:
 				it.Action, it.Reason = adapter.ActionUnchanged, "최신"
-				pl.item(it)
+				pl.Item(it)
 				if st.Hash != h.hash {
-					pl.state.Upsert(adapter.KindHook, h.key(), h.hash, pl.now)
+					pl.State.Upsert(adapter.KindHook, h.key(), h.hash, pl.Now)
 				}
 			default:
 				reason := "hook 정의 갱신"
-				if cur != st.Hash {
+				if modified {
 					reason = "수정된 관리 hook 을 --force-managed 로 덮어씀"
 				}
-				if apply(it, func() ([]byte, error) { return updateHandler(doc.cur, h.event, h.matcher, h.command, h.handler) }, adapter.ActionUpdate, reason) {
-					pl.state.Upsert(adapter.KindHook, h.key(), h.hash, pl.now)
+				if apply(it, func() ([]byte, error) { return updateHandler(doc.Cur, h.event, h.matcher, h.command, h.handler) }, adapter.ActionUpdate, reason) {
+					pl.State.Upsert(adapter.KindHook, h.key(), h.hash, pl.Now)
 				}
 			}
 		}
 	}
-	if op, ok := doc.op(); ok {
-		pl.plan.Ops = append(pl.plan.Ops, op)
+	if op, ok := doc.Op(); ok {
+		pl.Plan.Ops = append(pl.Plan.Ops, op)
 	}
 	return nil
 }
 
 func (pl *planner) newSettingsMode() os.FileMode {
-	if pl.scope == adapter.ScopeUser {
+	if pl.Scope == adapter.ScopeUser {
 		return 0o600
 	}
 	return 0o644

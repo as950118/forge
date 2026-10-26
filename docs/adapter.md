@@ -29,14 +29,73 @@ CLI(`internal/cli/sync.go`)는 추가로 `ResolveRoot(adapter.Request) (root str
 ## 타깃이 구현해야 하는 것
 
 1. **Name / Scopes**: `Name()` 은 안정적인 id. `ScopeProject`(저장소 루트 아래)와 `ScopeUser`(홈 아래)를 모두 처리하거나 한쪽을 명확히 거부한다. 사용자 스코프에서 비밀이 섞였거나 구조가 미확인인 설정 파일은 열지 않고 **명령만 출력**(`Plan.Commands`)한다.
-2. **루트 해석과 금지 루트**: `.git` 이 있는 상위 디렉터리를 프로젝트 루트로 쓰되, 홈·Forge 홈·클라이언트의 사용자 디렉터리와 **같은 디렉터리**(`EvalSymlinks` 후 `os.SameFile`)는 거부한다.
+2. **루트 해석과 금지 루트**: `adapter.ResolveRoot` 가 `.git` 이 있는 상위 디렉터리를 프로젝트 루트로 쓰고, 홈·Forge 홈과 **같은 디렉터리**(`EvalSymlinks` 후 `os.SameFile`)는 거부한다. 타깃은 클라이언트의 사용자 디렉터리 목록(`adapter.ForbiddenDir`)만 넘긴다.
 3. **Inputs 수집**: 위 `LoadInputs` 를 쓴다. 어댑터가 자체적으로 레지스트리나 DB 를 열지 않는다.
-4. **Plan 렌더**: 항목마다 현재 파일 상태를 읽어 `add/update/remove/unchanged/conflict/skip` 을 정하고, 바꿀 것만 `Ops` 에 담는다. 렌더 직전에 `mcp.Spec.Validate` 와 비밀·치환 문법 검사를 다시 한다(값뿐 아니라 env/헤더 **이름**도 `adapter.CheckValueKey` 로 모든 참조 종류에 대해 검사: 치환 문법·제어 문자·공백·따옴표·역슬래시·비ASCII·128자 초과 거부; env 는 식별자, 헤더는 HTTP token)(레지스트리 검증은 첫 번째 방어선일 뿐). JSON 설정은 `jsonedit`(바이트 오프셋 편집)로만 고친다. 상태 파일 쓰기는 **마지막 작업**이어야 한다(`finishState`).
-5. **허용 경로 `AllowedPath`**: 이 어댑터가 쓸 수 있는 경로의 **전체 목록**(설정 파일, 상태 파일, 스킬 디렉터리 1단계)만 통과시키고, 첫 줄에서 `adapter.GuardPath` 를 호출한다. 엔진은 Apply·Restore·저널 검증 때 이 함수로 경로를 다시 검사하므로 변조된 manifest/저널이 다른 경로를 가리킬 수 없다. 반환하는 `base` 아래의 경로 구성요소가 심볼릭 링크이면 엔진이 거부한다.
+4. **Plan 렌더**: 항목마다 현재 파일 상태를 읽어 `add/update/remove/unchanged/conflict/skip` 을 정하고, 바꿀 것만 `Ops` 에 담는다. 렌더 직전에 `mcp.Spec.Validate` 와 비밀·치환 문법 검사를 다시 한다(값뿐 아니라 env/헤더 **이름**도 `adapter.CheckValueKey` 로 모든 참조 종류에 대해 검사: 치환 문법·제어 문자·공백·따옴표·역슬래시·비ASCII·128자 초과 거부; env 는 식별자, 헤더는 HTTP token)(레지스트리 검증은 첫 번째 방어선일 뿐). JSON 설정은 `jsonedit`(바이트 오프셋 편집)로만 고친다. 상태 파일 쓰기는 **마지막 작업**이어야 한다(`Planner.FinishState`).
+5. **허용 경로 `AllowedPath`**: 이 어댑터가 쓸 수 있는 경로의 **전체 목록**(설정 파일, 상태 파일, 스킬 디렉터리 1단계)만 통과시킨다. `adapter.AllowedPath` 가 첫 줄에서 `adapter.GuardPath` 를 호출하므로 타깃은 설정 파일 경로 목록만 넘긴다. 엔진은 Apply·Restore·저널 검증 때 이 함수로 경로를 다시 검사하므로 변조된 manifest/저널이 다른 경로를 가리킬 수 없다. 반환하는 `base` 아래의 경로 구성요소가 심볼릭 링크이면 엔진이 거부한다.
 6. **금지 경로 가드**: 모든 파일 입출력은 `GuardPath` 를 거친다. 판정은 이름이 아니라 **(디렉터리, 파일 이름) 조합과 파일 동일성**(`os.SameFile`; 하드링크·심볼릭 링크)이다 — 같은 이름이라도 클라이언트의 설정·데이터 디렉터리 밖의 파일은 정상이다(`credential-helper` 스킬). 추가로 `ReadFileSafe` 는 `st_nlink > 1` 인 파일을 `ErrHardLinked`("하드링크된 설정 파일은 지원하지 않습니다")로 거부하고, `TreeHash`/`copyTree` 는 트리 안 각 파일에 동일성 검사를 한다. 새 클라이언트의 비밀 파일은 `internal/adapter/guard.go` 에만 추가한다(다른 소스에 이름을 적지 않는다; 테스트가 확인한다).
 7. **상태 파일 이름 규칙**: 타깃마다 **서로 다른 파일**을 쓴다. 프로젝트는 `<repo>/.forge/sync-state[.<target>].json`·`sync-journal[.<target>].json`(claude-code 는 호환을 위해 접미사 없음, opencode 는 `.opencode`), 사용자는 `$FORGE_HOME/sync-state/<target>-user.json`·`<target>-user.journal.json`. 내용은 `adapter.State`(종류·이름·해시·시각, 비밀 없음). `ParseState` 는 target/scope 가 다르면 거부한다. 임시 파일 이름(`.forge-tmp-*`/`.forge-old-*`)과 백업 manifest·저널의 `target` 은 엔진이 기록한다.
 8. **충돌 의미**: 상태 파일에 없는 항목 = 사용자 소유 → `conflict`(덮어쓰기 불가, `Overridable=false`). 상태에 있으나 현재 내용 해시가 다르면(손 수정) `conflict` + `Overridable=true`(`--force-managed` 로만 덮어씀, 백업됨). 스킬은 마커 `.forge-managed` + 상태 + 트리 해시가 모두 맞을 때만 관리 항목이다. 충돌 항목은 어떤 경우에도 `Ops` 에 들어가지 않고, 충돌이 있으면 Apply 는 `--skip-conflicts` 없이는 아무것도 쓰지 않는다(`ErrConflicts`).
-9. **중복 노출 방지(해당 시)**: 클라이언트가 다른 클라이언트의 설정 경로도 읽는다면(OpenCode 는 `.claude/skills` 를 읽음) 다른 타깃의 **상태 파일을 읽기만** 해서 이미 노출된 항목을 건너뛴다(`opencode/opencode.go` `loadClaims`). 상태 파일 경로는 그 어댑터가 공개한 함수로만 얻는다(`claudecode.Adapter.StatePath`).
+9. **중복 노출 방지(해당 시)**: 클라이언트가 다른 클라이언트의 설정 경로도 읽는다면(OpenCode 는 `.claude/skills` 를 읽음) 다른 타깃의 **상태 파일을 읽기만** 해서 이미 노출된 항목을 건너뛴다(`opencode/opencode.go` `loadClaims`, 읽기는 `adapter.ReadForeignState`). 상태 파일 경로는 그 어댑터가 공개한 함수로만 얻는다(`claudecode.Adapter.StatePath`).
+
+## 공통 계층: 보안 로직은 한 곳에 (TASK-0023)
+
+TASK-0011 은 claudecode 어댑터를 opencode 로 복사해(약 800줄) 한쪽의 보안 수정이 다른 쪽에 빠질 위험이 있었다. 지금은 아래 보안 로직이 `internal/adapter` 에 **한 번만** 있고, 타깃 패키지는 형식 변환(스키마·경로·치환 문법)과 훅(데이터/함수)만 가진다.
+
+| 보안 로직 | 공통 위치 | 타깃이 넘기는 것(형식) |
+|-----------|-----------|------------------------|
+| JSON 설정 로더(크기 제한 `ReadFileSafe`·`GuardPath`·심볼릭 링크·읽기 전용·엄격 JSON) | `docfile.go` `LoadDoc`/`DocFile` | 파일 경로 |
+| 스킬 마커·트리 해시·관리 판정(`planSkill`/`planStaleSkill`), 레지스트리 스냅샷 해시 검증, 스킬 `GuardPath` | `skills.go` `Planner.PlanSkills` | `SkillPolicy`(링크 안내 문구, 다른 타깃이 이미 노출한 스킬 `Claimed` 와 그 사유) |
+| 저널 인정(`Adopt`·`JournalListed`·`JournalOrphans`)과 관리 항목 해시 충돌 판정(제거·갱신: `ManagedModified`) | `planner.go` | 없음(항목 종류·이름·현재 해시) |
+| MCP `renderServer` 재검증(`Spec.Validate`)·`CheckValueKey`·`envNameRe`·서버 이름 규칙·비밀 literal·치환 문법·제어 문자 거부 | `mcpfile.go` `RenderServer` | `MCPFormat`(스키마 `Build`, 참조 문법 `Ref`, 치환 정규식 `Subst`, `SubstInCommand`, cwd 사유) |
+| MCP 파일 계획(소유권·해시 충돌·추가/갱신/제거·`jsonedit` 편집) 과 user 스코프 명령 출력 | `mcpfile.go` `PlanMCPFile`/`PlanMCPCommands` | `MCPFile`(경로·최상위 키·파일 라벨), `MCPTarget`(게이트웨이 항목·렌더 함수) |
+| `AllowedPath`·금지 루트·`ResolveRoot`·`--bin` 검사 | `planner.go` `AllowedPath`/`ResolveRoot`/`ValidateBin` | 쓸 수 있는 설정 파일 목록, `ForbiddenDir` 목록, 추가 `--bin` 검사 |
+| 상태 읽기·`FinishState`·임시 디렉터리 심볼릭 검사·중단 sync 탐지(`Preflight`) | `planner.go` `Planner` | `Paths`(루트·스킬 디렉터리·상태·저널 경로), 임시 파일 디렉터리 목록 |
+| 다른 타깃 상태 파일 읽기(중복 노출 방지) | `planner.go` `ReadForeignState` | 상태 파일 경로 |
+
+타깃에 남은 것: `claudecode` — `.mcp.json`(`mcpServers`, `${VAR}`)·`settings.json` 훅(`hooks.go`; 훅은 claude-code 에만 있어 타깃에 둔다, 해시 충돌 판정은 공통 `ManagedModified` 를 쓴다)·경로 표; `opencode` — `opencode.json`(`mcp`, `{env:VAR}`, local/remote)·`opencode.jsonc` 감지·XDG 스킬 경로·`loadClaims`. 이 둘은 해당 클라이언트의 사실이라 공통화하지 않았다.
+
+### 코드량·보안 로직 보유 (AC-2; 테스트 제외 `.go` 줄 수, `wc -l`)
+
+| | 이전(TASK-0026 머지 직후) | 이후 |
+|---|---|---|
+| `internal/adapter/claudecode` | 1592줄 (claudecode.go 445, skills.go 252, mcp.go 407, hooks.go 423, docfile.go 65) | 658줄 (claudecode.go 146, mcp.go 91, hooks.go 421) |
+| `internal/adapter/opencode` | 1364줄 (opencode.go 581, skills.go 275, mcp.go 443, docfile.go 65) | 418줄 (opencode.go 282, mcp.go 136) |
+| `internal/adapter` 공통(엔진 포함) | 3691줄 | 4848줄 (신규 `planner.go` 393, `skills.go` 281, `mcpfile.go` 418, `docfile.go` 65) |
+| 합계 | 6647줄 | 5924줄 |
+
+보안 로직 보유: 이전에는 두 어댑터가 위 표의 모든 항목을 **각자** 구현했다(8개 중 8개 복제). 이후 두 어댑터는 그 항목을 구현하지 않고 호출만 한다. 어댑터에 남은 판단은 형식 사실(어느 파일, 어느 키, 어느 치환 문법을 거부할지의 정규식)뿐이다. 새 보안 수정은 공통 파일 한 곳에 들어가며, 변이 시험(아래)으로 두 타깃 테스트가 모두 잡는지 확인했다.
+
+### 변이 시험 (AC-3)
+
+공통 로직을 한 번에 하나씩 망가뜨리고(적용 → `go test ./internal/adapter/... -short -count=1 -p 1` → 원복) 두 타깃의 테스트가 **모두** 실패하는지 확인했다. 기존 테스트는 일부 변이를 한 타깃만, 또는 어느 쪽도 잡지 못했다(공통 가드 호출이 `ReadFileSafe`·`Snapshot` 의 가드와 겹쳐 있어서). 그래서 같은 시나리오를 모든 타깃에 돌리는 `internal/adapter/conformance_test.go`(`TestShared*`)를 추가했다. 새 타깃은 `conformTargets` 에 한 줄을 더해 같은 시험을 통과해야 한다.
+
+| 변이(공통 코드) | 기존 테스트가 잡은 타깃 | 변이 시험 후 |
+|-----------------|------------------------|--------------|
+| 스킬 대상 `GuardPath` 제거 (`skills.go`) | 없음 | 둘 다: `TestSharedGuardedSkillTarget` |
+| 스킬 `StoreDir` `GuardPath` 제거 | 없음 | 둘 다: `TestSharedGuardedStoreDir` |
+| `AllowedPath` 의 `GuardPath` 제거 | 없음 | 둘 다: `TestSharedGuardedSkillTarget` |
+| `AllowedPath` 스킬 이름 규칙 제거 | 없음 | 둘 다: `TestSharedAllowedPathList` |
+| `renderServer` 재검증(`Spec.Validate`) 제거 | 없음 | 둘 다: `TestSharedRenderRefusals` |
+| `CheckValueKey` 제거 | 둘 다 (`TestRenderRefusesMaliciousValueKeysFromTheDatabase`) | 둘 다 |
+| 서버 이름 규칙·`envNameRe` 제거 | 없음 | 둘 다: `TestSharedRenderRefusals` |
+| 제어 문자 거부 제거 | opencode 만 | 둘 다: `TestSharedRenderRefusals` |
+| literal 치환 문법 거부 제거 | opencode 만 | 둘 다: `TestSharedRenderRefusals` |
+| 관리 항목 해시 충돌 판정(`ManagedModified`) 전부 생략 | 둘 다 (`TestManagedItemsEditedByHandAreConflicts`, `TestConflicts` 등) | 둘 다 |
+| 정리 대상 MCP 서버의 해시 충돌 판정 제거(`PlanMCPFile` 제거 경로) | 없음 | 둘 다: `TestSharedStaleServerEditedByHandIsConflict` |
+| 마커 `tree_hash` 증거 제거(`ManagedModified`; 갱신·제거 경로 각각) | 없음 | 둘 다: `TestSharedMarkerTreeHashEditIsConflict` |
+| `planSkill` 마커 검사 제거 | claude-code 만 | 둘 다: `TestSharedSkillWithMissingOrForeignMarkerIsNeverOverwritten` |
+| 저널 보증(`ManagedModified` 의 저널 절) 제거 | 없음 | 둘 다: `TestSharedJournalVouchesForCrashedUpdate` |
+| `Adopt` 의 저널 해시 일치 검사 제거(위조 저널) | 둘 다 (`TestRecoveryKeepsUserEdits`) | 둘 다 |
+| `LoadDoc` 심볼릭 링크 검사 생략 | 둘 다 (`TestSymlinksAreRefused`) | 둘 다 |
+| 스킬 심볼릭 링크 검사 생략 | 없음 | 둘 다: `TestSharedSkillBehindSymlinkIsRefused` |
+| 상태 파일 심볼릭 링크 검사 제거 | opencode 만 | 둘 다: `TestSharedStateFileBehindSymlinkIsRefused` |
+| 스냅샷 해시 검증 제거 | claude-code 만 | 둘 다: `TestSharedTamperedSnapshotIsRefused` |
+| 정리 대상 스킬의 마커 검사 제거 | claude-code 만 | 둘 다: `TestSharedStaleSkillWithoutMarkerIsKept` |
+| 금지 프로젝트 루트 검사 제거 | 둘 다 | 둘 다 |
+| `--bin` 제어 문자 검사 제거 | 둘 다 | 둘 다 |
+
+잡을 수 없는 변이(동치): (1) `LoadState` 의 `GuardPath` 제거 — 바로 다음 `ReadFileSafe` 가 같은 가드로 같은 오류를 낸다. (2) `RenderServer` 의 비밀 literal 휴리스틱 제거 — 앞선 `Spec.Validate` 가 같은 조건(`IsSecret`·`LooksSecret`·`LooksSecretKV`)을 먼저 거부해 도달하지 못하는 두 번째 방어선이다. 둘 다 계층 방어로 남겼다. 한 타깃에만 의미가 있는 변이: 명령·인자·URL 치환 문법 검사(`SubstInCommand`)는 opencode 만 켠다(Claude Code 는 `${VAR}` 를 명령·인자에서도 확장하는 정상 기능이라 켜지 않음; opencode 테스트가 잡음), 다른 타깃 상태 파일 읽기 가드(`ReadForeignState`)는 opencode 만 쓴다(`TestOpenCodeForeignStateIsGuarded`).
 
 ## 엔진이 제공하는 것 (`internal/adapter`)
 
@@ -59,11 +118,16 @@ CLI(`internal/cli/sync.go`)는 추가로 `ResolveRoot(adapter.Request) (root str
 
 1. **형식 검증 스파이크 문서**: `docs/clients/<client>.md` 에 경로, 설정 키, 값 치환 문법, CLI 옵션, 비밀이 들어 있는 파일을 `[doc]`/`[help]`/`[local]`/`[bin]`/`[미확인]` 으로 구분해 적는다. **클라이언트 바이너리는 어댑터 개발 중에도 실행하지 않는다**(필요하면 `strings` 로 읽기만). 예외는 버전 게이트(`internal/clientver`)가 실행하는 `<binary> --version` 하나뿐이며, 새 타깃을 추가할 때는 `clientver.Specs` 에 바이너리 이름과 검증된 버전을 넣고 `docs/doctor.md` 표를 갱신한다.
 2. **레지스트리 클라이언트 id**: `db` 의 `clients` 테이블에 id 가 있어야 노출 설정(`mcp expose`)이 동작한다(스키마 변경은 별도 태스크).
-3. **어댑터 구현**: `internal/adapter/<client>/` — `Name`, `Plan`, `AllowedPath`, `ResolveRoot`; 상태·저널 파일 이름을 다른 타깃과 겹치지 않게 정한다. `[미확인]` 항목은 추정하지 않고 렌더하지 않는다(계획의 참고로 알린다).
-4. **가드**: 비밀 파일의 (디렉터리, 이름)을 `guard.go` 에 추가하고(동일 파일 판정 포함; 이름만으로 막지 않는다) 금지 루트를 어댑터 `forbiddenRoot` 에 추가한다. 프로젝트 설정 파일이 오탐으로 막히지 않는지 시험한다.
+3. **어댑터 구현(작다)**: `internal/adapter/<client>/` 에는 형식 변환만 둔다. 보안 로직(로더·스킬 판정·저널 인정·해시 충돌·재검증·가드·상태)은 **다시 쓰지 않고** 공통 계층을 호출한다.
+   - `Name`, `Plan`, `AllowedPath`, `ResolveRoot` 와 `paths`(`adapter.Paths` 를 포함: 루트·스킬 디렉터리·상태·저널; 상태·저널 파일 이름은 다른 타깃과 겹치지 않게 정한다).
+   - `Plan` 은 `adapter.ResolveRoot` → `adapter.ValidateBin` → `adapter.NewPlanner` → `Preflight(임시 디렉터리)` → `LoadState` → `PlanSkills(SkillPolicy)` → MCP(`PlanMCPFile` 또는 user 스코프 `PlanMCPCommands`) → `FinishState`(마지막) 순서로 부른다. 템플릿은 `opencode/opencode.go`(훅 없는 쪽).
+   - MCP 는 `adapter.MCPFormat`(스키마 `Build`·참조 문법 `Ref`·치환 정규식 `Subst`)과 `adapter.MCPFile`(경로·최상위 키·라벨)만 정의한다. `renderServer`·`envNameRe`·서버 이름 규칙은 새로 만들지 않는다.
+   - `AllowedPath` 는 `adapter.AllowedPath` 에 쓸 수 있는 설정 파일 목록만 넘긴다. 금지 루트는 `adapter.ResolveRoot` 에 `ForbiddenDir` 목록으로 넘긴다.
+   - `[미확인]` 항목은 추정하지 않고 렌더하지 않는다(계획의 참고로 알린다). 타깃에만 있는 기능(훅, JSONC 감지, 경로 규칙)은 타깃 안에 둔다.
+4. **가드**: 비밀 파일의 (디렉터리, 이름)을 `guard.go` 에 추가한다(동일 파일 판정 포함; 이름만으로 막지 않는다). 프로젝트 설정 파일이 오탐으로 막히지 않는지 시험한다. 금지 루트는 3번의 `ForbiddenDir` 로 넘긴다.
 5. **등록**: `internal/cli/sync.go` 의 `syncAdapters`, `supportedTargets`, 도움말, 지원하지 않는 플래그 오류.
 6. **픽스처**: `testdata/<버전>/` 에 기존 사용자 설정(가짜 비밀 포함)과 골든 결과, `NOTES.txt` 에 근거와 `[미확인]`. `.gitignore` 에 걸리는 이름은 `dot-` 접두.
-7. **테스트(최소)**: plan 무쓰기, apply 멱등, 사용자 항목 보존(키 순서·들여쓰기·CRLF), 충돌 5종, 파싱 불가 무변경, 심볼릭 링크 거부, 백업·복원·롤백, 크래시 매트릭스, 저널 위조, 금지 루트·가드(하드링크 포함), diff 마스킹, 변환 정확성(특수 문자 인자), 사용자 스코프 명령 `sh -n`, 다른 타깃과의 교차 실행·중복 노출 방지, 실제 HOME 비접근.
+7. **테스트(최소)**: 공통 로직의 테스트는 공통 패키지와 기존 두 타깃에 있으므로 **새 타깃도 같은 시나리오를 통과**해야 한다(어댑터가 공통 함수를 실제로 호출하는지 확인하는 것이 목적이다; 변이 시험: 공통 가드·재검증·해시 충돌·심볼릭 검사를 하나씩 끄면 새 타깃 테스트도 실패해야 한다). plan 무쓰기, apply 멱등, 사용자 항목 보존(키 순서·들여쓰기·CRLF), 충돌 5종, 파싱 불가 무변경, 심볼릭 링크 거부, 백업·복원·롤백, 크래시 매트릭스, 저널 위조, 금지 루트·가드(하드링크 포함), diff 마스킹, 변환 정확성(특수 문자 인자), 사용자 스코프 명령 `sh -n`, 다른 타깃과의 교차 실행·중복 노출 방지, 실제 HOME 비접근.
 8. **위협 점검**: 비밀이 파일·diff·명령·오류·상태 파일에 새지 않는지, 클라이언트의 치환 문법(`{env:}`/`{file:}`/`${}`)으로 값이 바뀌어 읽히지 않는지, 설정 파일 우선순위·확장자(JSONC)로 엉뚱한 파일을 쓰지 않는지, 사용자 디렉터리가 프로젝트 루트로 쓰이지 않는지.
 9. **문서**: `docs/sync.md` 에 스코프별 대상 표·근거 표·한계를 추가한다.
 
@@ -87,7 +151,7 @@ CLI(`internal/cli/sync.go`)는 추가로 `ResolveRoot(adapter.Request) (root str
 
 ## 현재 알려진 한계
 
-- 어댑터 두 개의 계획·스킬·MCP 코드는 구조가 같지만 **복사**되어 있다(`opencode/skills.go`, `mcp.go`, `docfile.go`, `opencode.go` 는 claudecode 의 해당 파일에서 파생). 세 번째 타깃이 생기면 공통 계층(`planner` 의 상태·저널 처리, 스킬 계획, JSON 문서 로더)을 `internal/adapter` 로 올리는 리팩터링이 필요하다.
-- 중복 노출 방지는 **opencode → claude-code 방향만** 구현되어 있다. opencode 가 먼저 스킬을 `.opencode/skills` 에 썼다면, 이후 claude-code 를 sync 하면 같은 스킬이 두 경로에 있게 된다. 이어서 opencode 를 다시 sync 하면 중복이 제거된다(수렴). claude-code 어댑터에는 같은 방지가 없다(범위 밖; 후속 과제). 같은 프로젝트의 project 스코프 opencode 와 user 스코프 claude-code(`~/.claude/skills`) 사이의 중복은 검사하지 않는다.
+- 보안 로직 공통화(TASK-0023)는 끝났다. 남은 어댑터별 코드는 형식 변환이다. 훅(`claudecode/hooks.go`)은 claude-code 만 있어 타깃에 있으며, 두 번째 훅 타깃이 생기면 같은 방식으로 올린다.
+- 중복 노출 방지는 **opencode → claude-code 방향만** 있고 이것이 맞는 설계다(TASK-0023 AC-5 판정). OpenCode 는 `.claude/skills` 와 `.opencode/skills` 를 모두 읽지만(`docs/clients/opencode.md` 스킬 표), Claude Code 가 읽는 스킬 경로는 `~/.claude/skills`, `<repo>/.claude/skills`(및 `--add-dir`·엔터프라이즈·플러그인)뿐이고 `.opencode/skills` 는 없다(`docs/clients/claude-code.md` 스킬 표). 그래서 opencode 가 먼저 `.opencode/skills` 에 쓴 스킬이 있어도 Claude Code 에서는 **중복이 생기지 않는다**: 중복을 보는 쪽은 OpenCode 하나이고, 그쪽은 이미 `claimed`(`opencode/opencode.go` `loadClaims`, `adapter.SkillPolicy.Claimed`)로 막는다. claude-code 가 opencode 가 관리하는 스킬을 건너뛰면 Claude Code 에는 그 스킬이 **아예 없어지므로**(`.claude/skills` 에 쓰는 것이 Claude Code 에 노출하는 유일한 경로) 오히려 해롭다. 따라서 구현하지 않는다. 다만 claude-code 를 나중에 sync 하면 OpenCode 는 잠시 같은 스킬을 두 경로에서 보며, 이어서 opencode 를 다시 sync 하면 `.opencode` 사본이 제거되어 수렴한다. 같은 프로젝트의 project 스코프 opencode 와 user 스코프 claude-code(`~/.claude/skills`) 사이의 중복은 검사하지 않는다.
 - opencode: `opencode.jsonc`(주석)는 편집하지 않는다(주석 보존 불가) — `opencode.json` 이 없으면 중단, 둘 다 있으면 우선순위 [미확인] 경고. `[미확인]` 항목(cwd, timeout, oauth, tools 글롭, 플러그인)은 다루지 않는다. 버전 게이팅(`opencode --version`)은 어댑터가 아니라 CLI 의 버전 게이트(`forge sync --apply`, `forge doctor`; `docs/doctor.md`)가 한다.
 - 프로젝트 스코프 레지스트리·프로필별 노출은 아직 없다(docs/sync.md 한계).

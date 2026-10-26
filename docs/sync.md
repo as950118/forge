@@ -254,7 +254,7 @@ OpenCode 는 `.opencode/skills` 뿐 아니라 `.claude/skills` 도 읽는다([do
 
 ## 한계
 
-- (opencode) `opencode.jsonc` 는 지원하지 않는다(TASK-0022 후속 후보: 주석 보존 편집기). 중복 노출 방지는 opencode → claude-code 방향만이다. 어댑터 코드가 claudecode 에서 복사되어 있어 세 번째 타깃 전에 공통화가 필요하다(`docs/adapter.md`).
+- (opencode) `opencode.jsonc` 는 지원하지 않는다(TASK-0022 후속 후보: 주석 보존 편집기). 중복 노출 방지는 opencode 쪽에서만 필요하다(Claude Code 는 `.opencode/skills` 를 읽지 않는다; `docs/adapter.md` 한계). 보안 로직은 `internal/adapter` 공통 계층에 하나뿐이다(`docs/adapter.md`).
 - 프로젝트 스코프 레지스트리(`skill --project`)가 없어 전역 레지스트리만 내보낸다. 프로필별 노출(TASK-0012)은 아직 없고 MCP 노출은 `mcp expose`/`enable --client` 설정을 쓴다. 스킬·도구의 클라이언트별 노출 설정은 없다(활성이면 모두 내보냄). 사용자 정의 도구(`forge tool`)는 게이트웨이로만 제공되어 별도 렌더링이 없다.
 - user 스코프 MCP 는 파일을 쓰지 않아 상태 추적·자동 제거·되돌리기가 없다(명령 출력만).
 - 사용자가 `.mcp.json` 서버를 직접 정의한 이름과 겹치면 항상 충돌이다(동일 내용이어도 채택하지 않음).
