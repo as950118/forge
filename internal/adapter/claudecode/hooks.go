@@ -358,6 +358,9 @@ func (pl *planner) planHooks() error {
 			if pl.JournalListed(adapter.KindHook, h.key()) {
 				reason = "중단된 이전 sync 가 쓴 hook 이지만 그 뒤 내용이 수정되어 관리 항목으로 인정하지 않습니다 (" + why + ")"
 			}
+			if r := pl.LostBackupReason(adapter.KindHook, h.key()); r != "" {
+				reason = r
+			}
 			it.Action, it.Reason = adapter.ActionConflict, reason
 			pl.Item(it)
 		default:

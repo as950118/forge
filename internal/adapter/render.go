@@ -30,6 +30,9 @@ type Report struct {
 	// Interrupted: earlier syncs that were killed before finishing (the plan
 	// accounts for them; --apply finishes the work).
 	Interrupted []InterruptedInfo `json:"interrupted,omitempty"`
+	// LostBackups: interrupted syncs whose backup directory was deleted (their
+	// journal copy next to the state file is all that is left; see Notes).
+	LostBackups []string `json:"lost_backups,omitempty"`
 	// StaleTempFiles: leftovers of killed syncs; --apply removes them.
 	StaleTempFiles []string `json:"stale_temp_files,omitempty"`
 	// CleanedTempFiles / Recovered: what an apply did about the above.
@@ -101,6 +104,9 @@ func BuildReport(p *Plan, res *ApplyResult, withDiff bool) *Report {
 		in.ID, in.Kind, in.CreatedAt = safe(in.ID), safe(in.Kind), safe(in.CreatedAt)
 		r.Interrupted = append(r.Interrupted, in)
 	}
+	for _, id := range p.LostBackups {
+		r.LostBackups = append(r.LostBackups, safe(id))
+	}
 	for _, t := range p.StaleTemps {
 		r.StaleTempFiles = append(r.StaleTempFiles, safe(t))
 	}
@@ -171,8 +177,16 @@ func WriteTextAs(w io.Writer, p *Plan, res *ApplyResult, withDiff bool, mode str
 		fmt.Fprintf(w, "경고: 이전 %s 가 중단되었습니다 (백업 %s, %s 시작). 파일 %d개 중 완료 %d · 대기 %d · 수정/중간 상태 %d.\n",
 			what, in.ID, in.CreatedAt, in.Ops, in.Done, in.Todo, in.Changed)
 		if in.Kind == "restore" {
-			fmt.Fprintln(w, "      복원은 자동으로 이어 하지 않습니다. 같은 복원 명령(forge sync --restore <id> --force)을 다시 실행하세요.")
+			if in.RestoreOf != "" {
+				fmt.Fprintf(w, "      복원은 자동으로 이어 하지 않습니다. 이어서 완료하려면 forge sync --restore %s --force 를 다시 실행하세요 (%s 는 복원 직전 상태의 안전 백업이라 latest 에서 제외됩니다).\n", in.RestoreOf, in.ID)
+			} else {
+				fmt.Fprintf(w, "      복원은 자동으로 이어 하지 않습니다. 원래 복원 명령(forge sync --restore <복원하던 백업 id> --force)을 다시 실행하세요. %s 는 복원 직전 상태의 안전 백업이라 이것을 복원하면 복원이 되돌려집니다.\n", in.ID)
+			}
 		}
+	}
+	for _, id := range r.LostBackups {
+		fmt.Fprintf(w, "경고: 이전 sync 가 중단되었고 그 백업(%s)이 삭제되어 이어서 완료하거나 되돌릴 수 없습니다 (저널 사본만 남음).\n", id)
+		fmt.Fprintln(w, "      그 sync 가 만든 항목은 충돌로 보입니다. 안전한 해소: --skip-conflicts (충돌 항목만 제외). --force-managed 는 이 충돌에 효과가 없습니다. 자세한 내용은 아래 참고.")
 	}
 	if len(r.Interrupted) > 0 {
 		if res == nil {
@@ -194,7 +208,7 @@ func WriteTextAs(w io.Writer, p *Plan, res *ApplyResult, withDiff bool, mode str
 	if res != nil && len(r.CleanedTempFiles) > 0 {
 		fmt.Fprintf(w, "정리함: 중단된 sync 가 남긴 임시 파일 %d개\n", len(r.CleanedTempFiles))
 	}
-	if len(r.Interrupted) > 0 || len(r.StaleTempFiles) > 0 {
+	if len(r.Interrupted) > 0 || len(r.StaleTempFiles) > 0 || len(r.LostBackups) > 0 {
 		fmt.Fprintln(w)
 	}
 	fmt.Fprintln(w)

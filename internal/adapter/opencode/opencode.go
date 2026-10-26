@@ -275,7 +275,10 @@ func (pl *planner) loadClaims() {
 		return
 	}
 	for _, it := range st.Items {
-		if it.Kind == adapter.KindSkill {
+		// A claim from the sidecar counts only while the directory it names is
+		// really there with Forge's marker: a forged sidecar in an untrusted
+		// repository must not make this target skip skills that nobody exposes.
+		if it.Kind == adapter.KindSkill && adapter.IsManagedSkillDir(filepath.Join(pl.p.Root, ".claude", "skills", it.Name), it.Name) {
 			pl.claimed[it.Name] = true
 		}
 	}

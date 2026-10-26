@@ -31,9 +31,9 @@ CLI(`internal/cli/sync.go`)는 추가로 `ResolveRoot(adapter.Request) (root str
 1. **Name / Scopes**: `Name()` 은 안정적인 id. `ScopeProject`(저장소 루트 아래)와 `ScopeUser`(홈 아래)를 모두 처리하거나 한쪽을 명확히 거부한다. 사용자 스코프에서 비밀이 섞였거나 구조가 미확인인 설정 파일은 열지 않고 **명령만 출력**(`Plan.Commands`)한다.
 2. **루트 해석과 금지 루트**: `adapter.ResolveRoot` 가 `.git` 이 있는 상위 디렉터리를 프로젝트 루트로 쓰고, 홈·Forge 홈과 **같은 디렉터리**(`EvalSymlinks` 후 `os.SameFile`)는 거부한다. 타깃은 클라이언트의 사용자 디렉터리 목록(`adapter.ForbiddenDir`)만 넘긴다.
 3. **Inputs 수집**: 위 `LoadInputs` 를 쓴다. 어댑터가 자체적으로 레지스트리나 DB 를 열지 않는다.
-4. **Plan 렌더**: 항목마다 현재 파일 상태를 읽어 `add/update/remove/unchanged/conflict/skip` 을 정하고, 바꿀 것만 `Ops` 에 담는다. 렌더 직전에 `mcp.Spec.Validate` 와 비밀·치환 문법 검사를 다시 한다(값뿐 아니라 env/헤더 **이름**도 `adapter.CheckValueKey` 로 모든 참조 종류에 대해 검사: 치환 문법·제어 문자·공백·따옴표·역슬래시·비ASCII·128자 초과 거부; env 는 식별자, 헤더는 HTTP token)(레지스트리 검증은 첫 번째 방어선일 뿐). JSON 설정은 `jsonedit`(바이트 오프셋 편집)로만 고친다. 상태 파일 쓰기는 **마지막 작업**이어야 한다(`Planner.FinishState`).
+4. **Plan 렌더**: 항목마다 현재 파일 상태를 읽어 `add/update/remove/unchanged/conflict/skip` 을 정하고, 바꿀 것만 `Ops` 에 담는다. 렌더 직전에 `mcp.Spec.Validate` 와 비밀·치환 문법 검사를 다시 한다(값뿐 아니라 env/헤더 **이름**도 `adapter.CheckValueKey` 로 모든 참조 종류에 대해 검사: 치환 문법·제어 문자·공백·역슬래시·비ASCII·128자 초과·`__proto__` 거부; env 는 식별자, 헤더는 HTTP token — 따옴표 `'` 는 RFC 9110 token 문자라 헤더 이름에서는 허용되고(env 이름은 식별자 규칙이 거부), 큰따옴표는 어느 쪽에서도 거부된다)(레지스트리 검증은 첫 번째 방어선일 뿐). JSON 설정은 `jsonedit`(바이트 오프셋 편집)로만 고친다. 상태 파일 쓰기는 **마지막 작업**이어야 한다(`Planner.FinishState`).
 5. **허용 경로 `AllowedPath`**: 이 어댑터가 쓸 수 있는 경로의 **전체 목록**(설정 파일, 상태 파일, 스킬 디렉터리 1단계)만 통과시킨다. `adapter.AllowedPath` 가 첫 줄에서 `adapter.GuardPath` 를 호출하므로 타깃은 설정 파일 경로 목록만 넘긴다. 엔진은 Apply·Restore·저널 검증 때 이 함수로 경로를 다시 검사하므로 변조된 manifest/저널이 다른 경로를 가리킬 수 없다. 반환하는 `base` 아래의 경로 구성요소가 심볼릭 링크이면 엔진이 거부한다.
-6. **금지 경로 가드**: 모든 파일 입출력은 `GuardPath` 를 거친다. 판정은 이름이 아니라 **(디렉터리, 파일 이름) 조합과 파일 동일성**(`os.SameFile`; 하드링크·심볼릭 링크)이다 — 같은 이름이라도 클라이언트의 설정·데이터 디렉터리 밖의 파일은 정상이다(`credential-helper` 스킬). 추가로 `ReadFileSafe` 는 `st_nlink > 1` 인 파일을 `ErrHardLinked`("하드링크된 설정 파일은 지원하지 않습니다")로 거부하고, `TreeHash`/`copyTree` 는 트리 안 각 파일에 동일성 검사를 한다. 새 클라이언트의 비밀 파일은 `internal/adapter/guard.go` 에만 추가한다(다른 소스에 이름을 적지 않는다; 테스트가 확인한다).
+6. **금지 경로 가드**: 모든 파일 입출력은 `GuardPath` 를 거친다. 판정은 이름이 아니라 **(디렉터리, 파일 이름) 조합과 파일 동일성**(`os.SameFile`; 하드링크·심볼릭 링크)이다 — 같은 이름이라도 클라이언트의 설정·데이터 디렉터리 밖의 파일은 정상이다(`credential-helper` 스킬). 추가로 `ReadFileSafe` 는 `st_nlink > 1` 인 파일을 `ErrHardLinked`("하드링크된 설정 파일은 지원하지 않습니다")로 거부하고, `TreeHash`/`copyTree` 는 트리 안 각 파일에 동일성 검사와 같은 `nlink > 1` 검사(`ErrHardLinked`)를 하고, diff 의 트리 읽기도 하드링크된 파일은 읽지 않는다. `ErrHardLinked` 메시지는 조치("링크를 풀고 복사본으로 교체하세요")가 앞, 경로는 한 번만 뒤에 붙는다. 새 클라이언트의 비밀 파일은 `internal/adapter/guard.go` 에만 추가한다(다른 소스에 이름을 적지 않는다; 테스트가 확인한다).
 7. **상태 파일 이름 규칙**: 타깃마다 **서로 다른 파일**을 쓴다. 프로젝트는 `<repo>/.forge/sync-state[.<target>].json`·`sync-journal[.<target>].json`(claude-code 는 호환을 위해 접미사 없음, opencode 는 `.opencode`), 사용자는 `$FORGE_HOME/sync-state/<target>-user.json`·`<target>-user.journal.json`. 내용은 `adapter.State`(종류·이름·해시·시각, 비밀 없음). `ParseState` 는 target/scope 가 다르면 거부한다. 임시 파일 이름(`.forge-tmp-*`/`.forge-old-*`)과 백업 manifest·저널의 `target` 은 엔진이 기록한다.
 8. **충돌 의미**: 상태 파일에 없는 항목 = 사용자 소유 → `conflict`(덮어쓰기 불가, `Overridable=false`). 상태에 있으나 현재 내용 해시가 다르면(손 수정) `conflict` + `Overridable=true`(`--force-managed` 로만 덮어씀, 백업됨). 스킬은 마커 `.forge-managed` + 상태 + 트리 해시가 모두 맞을 때만 관리 항목이다. 충돌 항목은 어떤 경우에도 `Ops` 에 들어가지 않고, 충돌이 있으면 Apply 는 `--skip-conflicts` 없이는 아무것도 쓰지 않는다(`ErrConflicts`).
 9. **중복 노출 방지(해당 시)**: 클라이언트가 다른 클라이언트의 설정 경로도 읽는다면(OpenCode 는 `.claude/skills` 를 읽음) 다른 타깃의 **상태 파일을 읽기만** 해서 이미 노출된 항목을 건너뛴다(`opencode/opencode.go` `loadClaims`, 읽기는 `adapter.ReadForeignState`). 상태 파일 경로는 그 어댑터가 공개한 함수로만 얻는다(`claudecode.Adapter.StatePath`).
@@ -95,6 +95,37 @@ TASK-0011 은 claudecode 어댑터를 opencode 로 복사해(약 800줄) 한쪽�
 | 금지 프로젝트 루트 검사 제거 | 둘 다 | 둘 다 |
 | `--bin` 제어 문자 검사 제거 | 둘 다 | 둘 다 |
 
+TASK-0022 가 추가한 `TestShared*`/단위 시험의 변이 시험(각 변이는 한 번에 하나, 적용 → `go test ./internal/adapter/... -short -count=1 -p 1` → 원복 후 `cmp`). 결과:
+
+| 변이 | 변이 시험 후 실패한 테스트 (adapter 패키지 하나에서 두 타깃이 서브테스트로 실행됨) |
+|---|---|
+| `detectLostBackup` 호출 제거 (`planner.go`) | 둘 다: `TestSharedLostBackupOfInterruptedSyncIsExplained` |
+| `latest` 에서 중단된 복원의 안전 백업 제외 제거 (`backup.go`) | 둘 다: `TestSharedInterruptedRestoreResumesWithTheRightBackup` |
+| 저널의 `RestoreOf` 기록 제거 (`journal.go`) | 둘 다: 같은 시험 |
+| 복원 완료 시 이전 중단 복원 저널 정리 제거 (`restore.go`) | 둘 다: 같은 시험 |
+| diff 줄 단위 값 패턴 마스킹(`masker.line`) 제거 | `TestDiffLineMaskerCatchesValuesWithoutKeyOrJSON` (공통 diff 코드: 타깃 무관) |
+| 짧은 키 단어(`pwd`·`pw`·`pass`) 규칙 제거 | `TestDiffMasksPwdKeyNestedPwAndShortFlag`, `TestDiffMasksDirectNumberUnderSecretKey` |
+| `-p` 플래그 규칙 제거 / `--pw=값` 규칙 제거 | `TestDiffMasksPwdKeyNestedPwAndShortFlag` |
+| 키가 직접 가진 숫자 값 마스킹 제거 | `TestDiffMasksDirectNumberUnderSecretKey` |
+| `author(s)` 등 평범한 키 예외 제거 | `TestDiffKeepsOrdinaryWordsReadable` |
+| 비밀 값 변경 요약(`hiddenSecretChanges`) 제거 | `TestDiffAnnouncesSecretOnlyChange` |
+| `TreeHash` 의 `nlink` 검사 제거 | `TestSkillTreeHardLinkIsRefused`, 둘 다: `TestSharedHardLinkedFileInsideSkillTreeIsRefused` |
+| `copyTree` 의 `nlink` 검사 제거 | `TestSkillTreeHardLinkIsRefused` |
+| diff `readTreeFiles` 의 `nlink` 검사 제거 | `TestSkillTreeHardLinkIsRefused` |
+| `ErrHardLinked` 문구의 조치 앞배치 제거 | `TestHardLinkMessageRemedyFirstPathOnce` |
+| 백업 디렉터리 임시 파일 정리 제거(적용 쪽 / 계획 목록 쪽 각각) | 둘 다: `TestSharedBackupDirTempsAreListedAndCleaned` |
+| `__proto__` 이름 거부 제거 | `TestCheckValueKeyRefusesProto` |
+| 권한 오류를 심볼릭 링크로 오보하지 않는 분기 제거 | 둘 다: `TestSharedUnreadableSkillsDirIsNotCalledASymlink` |
+| opencode 의 상태 파일 스킬 주장 검증(`IsManagedSkillDir`) 제거 | `TestOpenCodeForgedClaimDoesNotSkipSkill` |
+| `ParseState` 의 target/scope 불일치 거부 제거 | 둘 다: `TestSharedStateFileOfAnotherTargetOrScopeIsRejected` (claude-code 는 기존 `TestStateFileCorruptionAborts` 도 잡음) |
+| `JournalOrphans` 의 저널 해시 일치 검사 제거 | 둘 다: `TestSharedHandEditedJournalOrphanIsNeverRemoved` |
+| `AllowedPath` 의 알 수 없는 scope 거부 제거 | 둘 다: `TestSharedAllowedPathUnknownScopeAndForgedStateNames/unknown-scope`, `TestSharedAllowedPathList` |
+| `planStaleSkill` 의 스킬 이름 규칙 제거 | 둘 다: `…ForgedStateNames/forged-state-names` |
+| MCP 정리 경로의 서버 이름 규칙 제거 (`PlanMCPFile`) | 둘 다: `…ForgedStateNames/forged-mcp-state-name` |
+| `ReadFileSafe` 의 `MaxJSONFileBytes` 검사 제거 | 둘 다: `TestSharedOversizedConfigFileIsRefused` |
+| `Preflight` 의 임시 디렉터리 심볼릭 링크 필터 제거 | 둘 다: `TestSharedPreflightIgnoresTempDirsBehindSymlinks` |
+| 스킬 제거 경로의 `WriteBlocker` 제거 | 둘 다: `TestSharedStaleSkillReadOnlyIsNotRemoved` |
+
 잡을 수 없는 변이(동치): (1) `LoadState` 의 `GuardPath` 제거 — 바로 다음 `ReadFileSafe` 가 같은 가드로 같은 오류를 낸다. (2) `RenderServer` 의 비밀 literal 휴리스틱 제거 — 앞선 `Spec.Validate` 가 같은 조건(`IsSecret`·`LooksSecret`·`LooksSecretKV`)을 먼저 거부해 도달하지 못하는 두 번째 방어선이다. 둘 다 계층 방어로 남겼다. 한 타깃에만 의미가 있는 변이: 명령·인자·URL 치환 문법 검사(`SubstInCommand`)는 opencode 만 켠다(Claude Code 는 `${VAR}` 를 명령·인자에서도 확장하는 정상 기능이라 켜지 않음; opencode 테스트가 잡음), 다른 타깃 상태 파일 읽기 가드(`ReadForeignState`)는 opencode 만 쓴다(`TestOpenCodeForeignStateIsGuarded`).
 
 ## 엔진이 제공하는 것 (`internal/adapter`)
@@ -151,6 +182,7 @@ TASK-0011 은 claudecode 어댑터를 opencode 로 복사해(약 800줄) 한쪽�
 
 ## 현재 알려진 한계
 
+- 표시·방어 세부(TASK-0022 AC-14): diff 마스킹의 키 규칙은 `author(s)`·`keyword(s)` 를 가리지 않는다(표시용; 값 패턴 단계가 실제 비밀을 잡는다). `__proto__` 는 env/헤더 이름으로 거부한다. 권한이 없는 `skills/` 는 "심볼릭 링크"가 아니라 "경로를 확인할 수 없어 거부합니다 (권한 …)" 로 알린다. 키가 직접 가진 숫자 값도 가린다. opencode 가 claude-code 상태 파일의 스킬 목록을 "이미 노출됨"으로 받아들이는 것은 `.claude/skills/<이름>` 이 실제로 있고 Forge 마커(이름 일치)가 있을 때뿐이다 — 낯선 저장소의 위조된 `.forge/sync-state.json` 으로 스킬을 건너뛰게 만드는 DoS 를 막는다(같은 실행의 `--target all` 계획에서 넘어온 `ClaimedSkills` 는 이 확인 없이 믿는다). 남는 한계: 위조된 마커+디렉터리까지 저장소가 가지고 있으면 그 스킬은 `.claude/skills` 로 노출된 것으로 보고 `.opencode` 사본을 만들지 않는다(그 디렉터리는 OpenCode 도 읽는다).
 - 보안 로직 공통화(TASK-0023)는 끝났다. 남은 어댑터별 코드는 형식 변환이다. 훅(`claudecode/hooks.go`)은 claude-code 만 있어 타깃에 있으며, 두 번째 훅 타깃이 생기면 같은 방식으로 올린다.
 - 중복 노출 방지는 **opencode → claude-code 방향만** 있고 이것이 맞는 설계다(TASK-0023 AC-5 판정). OpenCode 는 `.claude/skills` 와 `.opencode/skills` 를 모두 읽지만(`docs/clients/opencode.md` 스킬 표), Claude Code 가 읽는 스킬 경로는 `~/.claude/skills`, `<repo>/.claude/skills`(및 `--add-dir`·엔터프라이즈·플러그인)뿐이고 `.opencode/skills` 는 없다(`docs/clients/claude-code.md` 스킬 표). 그래서 opencode 가 먼저 `.opencode/skills` 에 쓴 스킬이 있어도 Claude Code 에서는 **중복이 생기지 않는다**: 중복을 보는 쪽은 OpenCode 하나이고, 그쪽은 이미 `claimed`(`opencode/opencode.go` `loadClaims`, `adapter.SkillPolicy.Claimed`)로 막는다. claude-code 가 opencode 가 관리하는 스킬을 건너뛰면 Claude Code 에는 그 스킬이 **아예 없어지므로**(`.claude/skills` 에 쓰는 것이 Claude Code 에 노출하는 유일한 경로) 오히려 해롭다. 따라서 구현하지 않는다. 다만 claude-code 를 나중에 sync 하면 OpenCode 는 잠시 같은 스킬을 두 경로에서 보며, 이어서 opencode 를 다시 sync 하면 `.opencode` 사본이 제거되어 수렴한다. 같은 프로젝트의 project 스코프 opencode 와 user 스코프 claude-code(`~/.claude/skills`) 사이의 중복은 검사하지 않는다.
 - opencode: `opencode.jsonc`(주석)는 편집하지 않는다(주석 보존 불가) — `opencode.json` 이 없으면 중단, 둘 다 있으면 우선순위 [미확인] 경고. `[미확인]` 항목(cwd, timeout, oauth, tools 글롭, 플러그인)은 다루지 않는다. 버전 게이팅(`opencode --version`)은 어댑터가 아니라 CLI 의 버전 게이트(`forge sync --apply`, `forge doctor`; `docs/doctor.md`)가 한다.

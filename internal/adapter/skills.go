@@ -3,9 +3,13 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/heonjinjeong/forge/internal/textsafe"
 )
 
 // marker is the content of <skill dir>/.forge-managed. Together with the sidecar
@@ -21,6 +25,20 @@ type marker struct {
 func (m marker) bytes() []byte {
 	b, _ := json.MarshalIndent(m, "", "  ")
 	return append(b, '\n')
+}
+
+// IsManagedSkillDir reports whether dir is a real directory (not a link, not below
+// one) carrying a Forge management marker for name.
+func IsManagedSkillDir(dir, name string) bool {
+	if !SkillNameRe.MatchString(name) || GuardPath(dir) != nil {
+		return false
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil || !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	mk, _, ok := readMarker(dir)
+	return ok && mk.Name == name
 }
 
 func readMarker(dir string) (marker, []byte, bool) {
@@ -125,6 +143,10 @@ func (pl *Planner) PlanSkills(ctx context.Context, pol SkillPolicy) error {
 // skillBlocked returns a reason when the target must not be written (symlink, read-only).
 func (pl *Planner) skillBlocked(target string, pol SkillPolicy) string {
 	if err := CheckNoSymlinks(pl.P.Root, target); err != nil {
+		if !errors.Is(err, ErrSymlink) {
+			// e.g. a skills directory without search permission (chmod 000): not a link.
+			return "경로를 확인할 수 없어 거부합니다 (권한 또는 파일 시스템 오류: " + MaskLine(textsafe.Display(err.Error(), 160)) + ")"
+		}
 		return "심볼릭 링크 경로라 따라가지 않고 거부합니다" + pol.LinkHint
 	}
 	return ""
@@ -157,7 +179,7 @@ func (pl *Planner) planSkill(s SkillInput, pol SkillPolicy) {
 	mk := marker{ManagedBy: "forge", Name: s.Name, Version: s.Version, TreeHash: wantHash}
 	snap, err := Snapshot(target)
 	if err != nil {
-		conflict("대상 디렉터리를 안전하게 읽을 수 없습니다 (링크/특수 파일 포함)", false)
+		conflict(unreadableTree(err), false)
 		return
 	}
 	st := pl.State.Find(KindSkill, s.Name)
@@ -198,6 +220,10 @@ func (pl *Planner) planSkill(s SkillInput, pol SkillPolicy) {
 	if st == nil {
 		if pl.JournalListed(KindSkill, s.Name) {
 			conflict("중단된 이전 sync 가 만든 디렉터리이지만 그 뒤 내용이 수정되어 관리 항목으로 인정하지 않습니다 (되돌리거나 지운 뒤 sync)", false)
+			return
+		}
+		if r := pl.LostBackupReason(KindSkill, s.Name); r != "" {
+			conflict(r, false)
 			return
 		}
 		conflict("관리 마커는 있으나 상태 파일에 기록이 없습니다 (다른 곳에서 복사된 디렉터리일 수 있음)", false)
@@ -245,7 +271,7 @@ func (pl *Planner) planStaleSkill(si StateItem, pol SkillPolicy) {
 	}
 	snap, err := Snapshot(target)
 	if err != nil {
-		conflict("대상 디렉터리를 안전하게 읽을 수 없습니다", false)
+		conflict(unreadableTree(err), false)
 		return
 	}
 	if !snap.Exists {
@@ -278,4 +304,14 @@ func (pl *Planner) planStaleSkill(si StateItem, pol SkillPolicy) {
 	pl.Item(it)
 	pl.Plan.Ops = append(pl.Plan.Ops, Op{Kind: OpDeleteTree, Path: target, Before: snap})
 	pl.State.Remove(KindSkill, si.Name)
+}
+
+// unreadableTree is the conflict reason for a skill directory that cannot be
+// snapshotted. A hard-linked file inside it gets its own wording (with the remedy
+// first), because the generic text would call it a link or special file.
+func unreadableTree(err error) string {
+	if errors.Is(err, ErrHardLinked) {
+		return "스킬 디렉터리 안에 하드링크된 파일이 있어 읽지 않습니다. " + MaskLine(textsafe.Display(err.Error(), 200))
+	}
+	return "대상 디렉터리를 안전하게 읽을 수 없습니다 (링크/특수 파일 포함)"
 }

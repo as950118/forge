@@ -74,6 +74,7 @@ func Apply(ctx context.Context, a Adapter, p *Plan, opts ApplyOptions) (*ApplyRe
 		return nil, fmt.Errorf("%w (충돌 %d건; --skip-conflicts 로 충돌 항목을 제외하고 적용할 수 있습니다)", ErrConflicts, c)
 	}
 	cleaned := CleanStaleTemps(p.TempDirs)
+	cleaned = append(cleaned, CleanStaleBackupTemps(opts.BackupDir)...)
 	if len(p.Ops) == 0 {
 		res := &ApplyResult{Changed: []FileChange{}, CleanedTemps: cleaned}
 		if len(p.RecoverIDs) > 0 {
@@ -112,6 +113,8 @@ type manifestMeta struct {
 	JournalPath, JournalBase string
 	// Supersedes: interrupted syncs this apply finishes (recorded in the manifest).
 	Supersedes []string
+	// RestoreOf: the backup a restore puts back (recorded in manifest and journal).
+	RestoreOf string
 }
 
 // removeJournalCopy deletes the journal copy at path when it really is a journal
@@ -178,7 +181,7 @@ func applyOps(ctx context.Context, a Adapter, meta manifestMeta, ops []Op, opts 
 		}
 	}
 	m := &Manifest{Version: 1, ID: id, CreatedAt: now.Format(time.RFC3339), Kind: meta.Kind, Target: meta.Target,
-		Scope: meta.Scope, Root: meta.Root, Status: StatusPending, CreatedDirs: created, Note: meta.Note, Supersedes: meta.Supersedes}
+		Scope: meta.Scope, Root: meta.Root, Status: StatusPending, CreatedDirs: created, Note: meta.Note, Supersedes: meta.Supersedes, RestoreOf: meta.RestoreOf}
 	abortBackup := func(err error) (*ApplyResult, error) {
 		_ = removeTree(bdir)
 		return nil, fmt.Errorf("백업 실패, 아무것도 변경하지 않았습니다: %w", err)
