@@ -624,3 +624,632 @@ func TestSharedMarkerTreeHashEditIsConflict(t *testing.T) {
 		})
 	}
 }
+
+// ---- TASK-0022: interrupted-sync / restore handling, state and journal checks ----
+
+// applyCrashAt applies p and simulates a kill at the named engine point; it
+// returns the id of the backup the killed apply created.
+func (c *conformProject) applyCrashAt(t *testing.T, p *adapter.Plan, point string) string {
+	t.Helper()
+	crashed := false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				if _, ok := r.(adapter.SimulatedCrash); !ok {
+					panic(r)
+				}
+				crashed = true
+			}
+		}()
+		_, _ = adapter.Apply(context.Background(), c.ad, p, adapter.ApplyOptions{BackupDir: filepath.Join(c.forge, "backups"),
+			Crash: func(pt string) bool { return pt == point }})
+	}()
+	if !crashed {
+		t.Fatalf("no crash at %q", point)
+	}
+	return c.lastBackup(t)
+}
+
+func (c *conformProject) lastBackup(t *testing.T) string {
+	t.Helper()
+	list, err := adapter.ListBackups(filepath.Join(c.forge, "backups"))
+	if err != nil || len(list) == 0 {
+		t.Fatalf("no backups: %v", err)
+	}
+	return list[len(list)-1].ID
+}
+
+// AC-1: a killed sync whose backup directory was deleted afterwards is reported
+// with the safe resolution, and the items it wrote are not explained as "copied
+// from elsewhere" / "user defined".
+func TestSharedLostBackupOfInterruptedSyncIsExplained(t *testing.T) {
+	for _, tg := range conformTargets {
+		for _, kind := range []string{adapter.KindSkill, adapter.KindMCP} {
+			t.Run(tg.name+"/"+kind, func(t *testing.T) {
+				c := newConformProject(t, tg)
+				var skills []adapter.SkillInput
+				var servers []*mcp.Info
+				name := "lost-skill"
+				if kind == adapter.KindSkill {
+					skills = []adapter.SkillInput{conformSkill(t, c.forge, name)}
+				} else {
+					name = "lost-srv"
+					servers = []*mcp.Info{conformServer(name, "node-lost")}
+				}
+				plan := func(mods ...func(*adapter.Request)) *adapter.Plan {
+					p, err := c.ad.Plan(context.Background(), adapter.Inputs{Client: tg.name, Skills: skills, Servers: servers}, c.req(mods...))
+					if err != nil {
+						t.Fatal(err)
+					}
+					return p
+				}
+				id := c.applyCrashAt(t, plan(), "op-0:done") // the item is written, the state file is not
+				if p := plan(); len(p.Interrupted) != 1 || len(p.LostBackups) != 0 {
+					t.Fatalf("control: want a normal interruption, got %+v lost=%v", p.Interrupted, p.LostBackups)
+				}
+				if err := os.RemoveAll(filepath.Join(c.forge, "backups", id)); err != nil {
+					t.Fatal(err)
+				}
+				p := plan()
+				if len(p.LostBackups) != 1 || p.LostBackups[0] != id || len(p.Interrupted) != 0 {
+					t.Fatalf("want the lost backup %s reported, got lost=%v interrupted=%+v", id, p.LostBackups, p.Interrupted)
+				}
+				notes := strings.Join(p.Notes, "\n")
+				for _, want := range []string{"삭제", "--skip-conflicts", "--force-managed"} {
+					if !strings.Contains(notes, want) {
+						t.Errorf("note lacks %q: %s", want, notes)
+					}
+				}
+				it := conformItem(t, p, kind, name)
+				if it.Action != adapter.ActionConflict || it.Overridable || !strings.Contains(it.Reason, "삭제되어") ||
+					strings.Contains(it.Reason, "복사된") || strings.Contains(it.Reason, "직접 정의한") {
+					t.Fatalf("want a lost-backup conflict, got %s overridable=%v %q", it.Action, it.Overridable, it.Reason)
+				}
+				var buf strings.Builder
+				adapter.WriteText(&buf, p, nil, false)
+				if !strings.Contains(buf.String(), "백업("+id+")이 삭제되어") {
+					t.Errorf("the text output does not warn:\n%s", buf.String())
+				}
+				if r := adapter.BuildReport(p, nil, false); len(r.LostBackups) != 1 {
+					t.Errorf("the JSON report lacks lost_backups: %+v", r.LostBackups)
+				}
+				// --force-managed does not turn it into an overwrite.
+				pf := plan(func(r *adapter.Request) { r.ForceManaged = true })
+				if it := conformItem(t, pf, kind, name); it.Action != adapter.ActionConflict {
+					t.Fatalf("--force-managed must not adopt it, got %s", it.Action)
+				}
+			})
+		}
+	}
+}
+
+// AC-2: after a killed restore, "latest" must not select the safety backup (the
+// state from before the restore: restoring it undoes the half-done restore), the
+// warning names the backup to run again, and running it finishes the restore and
+// clears the interruption.
+func TestSharedInterruptedRestoreResumesWithTheRightBackup(t *testing.T) {
+	for _, tg := range conformTargets {
+		t.Run(tg.name, func(t *testing.T) {
+			c := newConformProject(t, tg)
+			v1 := conformSkillV(t, c.forge, "resume-skill", "1.0.0")
+			v2 := conformSkillV(t, c.forge, "resume-skill", "2.0.0")
+			p1, err := c.plan(t, []adapter.SkillInput{v1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.apply(t, p1, nil)
+			target := conformItem(t, p1, adapter.KindSkill, "resume-skill").Path
+			p2, err := c.plan(t, []adapter.SkillInput{v2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.apply(t, p2, nil)
+			b2 := c.lastBackup(t) // v1 -> v2
+			bdir := filepath.Join(c.forge, "backups")
+			want1, _, _ := adapter.TreeHash(v1.StoreDir, false)
+
+			// Restore b2 (back to v1) and kill it after the first file.
+			crashed := false
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						if _, ok := r.(adapter.SimulatedCrash); !ok {
+							panic(r)
+						}
+						crashed = true
+					}
+				}()
+				_, _ = adapter.Restore(context.Background(), c.ad, adapter.RestoreOptions{
+					ApplyOptions: adapter.ApplyOptions{BackupDir: bdir, Crash: func(pt string) bool { return pt == "op-0:done" }}, ID: b2, Force: true})
+			}()
+			if !crashed {
+				t.Fatal("the restore was not interrupted")
+			}
+			safety := c.lastBackup(t)
+			if safety == b2 {
+				t.Fatal("the interrupted restore left no safety backup")
+			}
+			if latest, err := adapter.ResolveBackup(bdir, "latest"); err != nil || latest != b2 {
+				t.Fatalf("latest must skip the interrupted restore's safety backup %s and give %s, got %q (%v)", safety, b2, latest, err)
+			}
+			p, err := c.plan(t, []adapter.SkillInput{v2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(p.Interrupted) != 1 || p.Interrupted[0].Kind != "restore" || p.Interrupted[0].RestoreOf != b2 || p.Interrupted[0].ID != safety {
+				t.Fatalf("want the interrupted restore of %s, got %+v", b2, p.Interrupted)
+			}
+			var buf strings.Builder
+			adapter.WriteText(&buf, p, nil, false)
+			if !strings.Contains(buf.String(), "forge sync --restore "+b2+" --force") {
+				t.Errorf("the warning does not name the backup to run again (%s):\n%s", b2, buf.String())
+			}
+			if strings.Contains(buf.String(), "forge sync --restore "+safety) {
+				t.Errorf("the warning tells to run the safety backup %s:\n%s", safety, buf.String())
+			}
+			// Running "latest --force" finishes the restore: the skill is v1 again.
+			id, err := adapter.ResolveBackup(bdir, "latest")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := adapter.Restore(context.Background(), c.ad, adapter.RestoreOptions{ApplyOptions: adapter.ApplyOptions{BackupDir: bdir}, ID: id, Force: true}); err != nil {
+				t.Fatalf("restore latest --force: %v", err)
+			}
+			if got, _, err := adapter.TreeHash(target, true); err != nil || got != want1 {
+				t.Fatalf("the restore was undone instead of finished (hash %s, want %s, %v)", got, want1, err)
+			}
+			p, err = c.plan(t, []adapter.SkillInput{v1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(p.Interrupted) != 0 {
+				t.Fatalf("a finished resume still shows an interruption: %+v", p.Interrupted)
+			}
+		})
+	}
+}
+
+// AC-15 (1): a state file of another target or scope is refused, not read as ours.
+func TestSharedStateFileOfAnotherTargetOrScopeIsRejected(t *testing.T) {
+	for _, tg := range conformTargets {
+		t.Run(tg.name, func(t *testing.T) {
+			c := newConformProject(t, tg)
+			p, err := c.plan(t, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, content := range map[string]string{
+				"target": `{"version":1,"target":"someone-else","scope":"project","items":[]}`,
+				"scope":  `{"version":1,"target":"` + tg.name + `","scope":"user","items":[]}`,
+			} {
+				conformDir(t, filepath.Dir(p.StatePath))
+				if err := os.WriteFile(p.StatePath, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.plan(t, nil); err == nil || !strings.Contains(err.Error(), "상태 파일의 대상") {
+					t.Errorf("%s mismatch: want a refusal, got %v", name, err)
+				}
+			}
+		})
+	}
+}
+
+// AC-15 (2): an orphan skill (written by a killed sync, absent from the state
+// file, no longer wanted) that was edited by hand is never removed, with or
+// without --force-managed; an unedited one is removed (control).
+func TestSharedHandEditedJournalOrphanIsNeverRemoved(t *testing.T) {
+	for _, tg := range conformTargets {
+		t.Run(tg.name, func(t *testing.T) {
+			setup := func() (*conformProject, string) {
+				c := newConformProject(t, tg)
+				sk := conformSkill(t, c.forge, "orphan-skill")
+				p, err := c.plan(t, []adapter.SkillInput{sk})
+				if err != nil {
+					t.Fatal(err)
+				}
+				target := conformItem(t, p, adapter.KindSkill, "orphan-skill").Path
+				c.applyCrashAt(t, p, "op-0:done")
+				return c, target
+			}
+			c, target := setup()
+			p, err := c.plan(t, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if it := conformItem(t, p, adapter.KindSkill, "orphan-skill"); it.Action != adapter.ActionRemove || !opFor(p, target) {
+				t.Fatalf("control: an unedited orphan must be removed, got %s %q", it.Action, it.Reason)
+			}
+			c, target = setup()
+			f, err := os.OpenFile(filepath.Join(target, "SKILL.md"), os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.WriteString("my own notes\n")
+			f.Close()
+			for _, force := range []bool{false, true} {
+				p, err := c.plan(t, nil, func(r *adapter.Request) { r.ForceManaged = force })
+				if err != nil {
+					t.Fatal(err)
+				}
+				if opFor(p, target) {
+					t.Errorf("force=%v: the hand-edited orphan is in the operations", force)
+				}
+				for _, it := range p.Items {
+					if it.Name == "orphan-skill" && it.Action == adapter.ActionRemove {
+						t.Errorf("force=%v: planned to remove the hand-edited orphan: %q", force, it.Reason)
+					}
+				}
+			}
+		})
+	}
+}
+
+// AC-15 (3): AllowedPath refuses an unknown scope even for a path that is valid in
+// the user layout (a target must not fall back to it), and forged state items with
+// invalid names (skill, MCP) neither plan an operation nor survive in the state.
+func TestSharedAllowedPathUnknownScopeAndForgedStateNames(t *testing.T) {
+	for _, tg := range conformTargets {
+		t.Run(tg.name+"/unknown-scope", func(t *testing.T) {
+			base := conformBase(t)
+			forge := conformDir(t, base, "forge")
+			home := filepath.Join(base, "home")
+			ad := tg.adapter(forge)
+			in := adapter.Inputs{Client: tg.name, Skills: []adapter.SkillInput{conformSkill(t, forge, "scope-skill")}}
+			p, err := ad.Plan(context.Background(), in, adapter.Request{Scope: adapter.ScopeUser, Home: home, ForgeBin: "forge", NoHooks: tg.noHooks})
+			if err != nil {
+				t.Fatal(err)
+			}
+			skill := conformItem(t, p, adapter.KindSkill, "scope-skill").Path
+			for _, path := range []string{skill, p.StatePath} {
+				if _, err := ad.AllowedPath(adapter.ScopeUser, home, path); err != nil {
+					t.Fatalf("control: user-scope path %s refused: %v", path, err)
+				}
+				if _, err := ad.AllowedPath(adapter.Scope("other"), home, path); err == nil {
+					t.Errorf("AllowedPath accepted %s for an unknown scope", path)
+				}
+				if _, err := ad.AllowedPath(adapter.Scope(""), home, path); err == nil {
+					t.Errorf("AllowedPath accepted %s for an empty scope", path)
+				}
+			}
+		})
+		t.Run(tg.name+"/forged-mcp-state-name", func(t *testing.T) {
+			// A state item naming an invalid server name whose hash matches an entry
+			// that is really in the file must not delete that entry.
+			c := newConformProject(t, tg)
+			srv := []*mcp.Info{conformServer("probe-srv", "node")}
+			p0 := c.planServers(t, srv)
+			cfg := conformItem(t, p0, adapter.KindMCP, "probe-srv").Path
+			key := "mcpServers"
+			if tg.name == "opencode" {
+				key = "mcp"
+			}
+			entry := `{"command":"x"}`
+			if err := os.WriteFile(cfg, []byte(`{"`+key+`":{"bad name":`+entry+`}}`+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			h, err := adapter.HashJSON([]byte(entry))
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := fmt.Sprintf(`{"version":1,"target":%q,"scope":"project","items":[{"kind":"mcp","name":"bad name","hash":%q,"applied_at":"x"}]}`, tg.name, h)
+			conformDir(t, filepath.Dir(p0.StatePath))
+			if err := os.WriteFile(p0.StatePath, []byte(state), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			p := c.planServers(t, nil, func(r *adapter.Request) { r.ForceManaged = true })
+			for _, op := range p.Ops {
+				if op.Path == cfg && !strings.Contains(string(op.Data), `"bad name"`) {
+					t.Fatalf("the entry named by a forged state item was deleted:\n%s", op.Data)
+				}
+			}
+			for _, it := range p.Items {
+				if it.Name == "bad name" && it.Action == adapter.ActionRemove {
+					t.Fatalf("planned to remove an invalid-named server: %q", it.Reason)
+				}
+			}
+		})
+		t.Run(tg.name+"/forged-state-names", func(t *testing.T) {
+			c := newConformProject(t, tg)
+			p0, err := c.plan(t, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A directory outside the skills directory that looks managed under the name "../../evil".
+			evil := conformDir(t, c.proj, "evil")
+			if err := os.WriteFile(filepath.Join(evil, "SKILL.md"), []byte("x\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			h, _, err := adapter.TreeHash(evil, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mk := fmt.Sprintf(`{"managed_by":"forge","name":"../../evil","version":"1","tree_hash":%q}`, h)
+			if err := os.WriteFile(filepath.Join(evil, adapter.MarkerName), []byte(mk), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			state := fmt.Sprintf(`{"version":1,"target":%q,"scope":"project","items":[`+
+				`{"kind":"skill","name":"../../evil","hash":%q,"applied_at":"x"},`+
+				`{"kind":"skill","name":"Bad_Name","hash":%q,"applied_at":"x"},`+
+				`{"kind":"mcp","name":"bad name","hash":%q,"applied_at":"x"},`+
+				`{"kind":"mcp","name":"../x","hash":%q,"applied_at":"x"}]}`, tg.name, h, h, h, h)
+			conformDir(t, filepath.Dir(p0.StatePath))
+			if err := os.WriteFile(p0.StatePath, []byte(state), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			p, err := c.plan(t, nil, func(r *adapter.Request) { r.ForceManaged = true })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if opFor(p, evil) {
+				t.Fatalf("a forged skill name planned an operation on %s", evil)
+			}
+			if _, err := os.Stat(filepath.Join(evil, "SKILL.md")); err != nil {
+				t.Fatalf("the outside directory was touched: %v", err)
+			}
+			if _, err := c.ad.AllowedPath(adapter.ScopeProject, p.Root, evil); err == nil {
+				t.Errorf("AllowedPath accepted %s", evil)
+			}
+			for _, it := range p.NewState.Items {
+				if strings.Contains(it.Name, "evil") || it.Name == "Bad_Name" || it.Name == "bad name" || it.Name == "../x" {
+					t.Errorf("a forged state item survived: %+v", it)
+				}
+			}
+		})
+	}
+}
+
+// AC-15 (4a): a config file above MaxJSONFileBytes is refused (nothing is read whole).
+func TestSharedOversizedConfigFileIsRefused(t *testing.T) {
+	for _, tg := range conformTargets {
+		t.Run(tg.name, func(t *testing.T) {
+			c := newConformProject(t, tg)
+			srv := []*mcp.Info{conformServer("big-srv", "node")}
+			path := conformItem(t, c.planServers(t, srv), adapter.KindMCP, "big-srv").Path
+			big := make([]byte, adapter.MaxJSONFileBytes+1)
+			for i := range big {
+				big[i] = ' '
+			}
+			copy(big, "{}")
+			if err := os.WriteFile(path, big, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := c.ad.Plan(context.Background(), adapter.Inputs{Client: tg.name, Servers: srv}, c.req())
+			if err == nil || !strings.Contains(err.Error(), "너무 큽니다") {
+				t.Fatalf("want a size refusal, got %v", err)
+			}
+		})
+	}
+}
+
+// AC-15 (4b): leftover temp files below a linked directory are neither listed nor
+// removed (Preflight drops temp directories that are reached through a symlink).
+func TestSharedPreflightIgnoresTempDirsBehindSymlinks(t *testing.T) {
+	for _, tg := range conformTargets {
+		t.Run(tg.name, func(t *testing.T) {
+			c := newConformProject(t, tg)
+			sk := conformSkill(t, c.forge, "temp-skill")
+			p, err := c.plan(t, []adapter.SkillInput{sk})
+			if err != nil {
+				t.Fatal(err)
+			}
+			skillsDir := filepath.Dir(conformItem(t, p, adapter.KindSkill, "temp-skill").Path)
+			clientDir := filepath.Dir(skillsDir) // <proj>/.claude or <proj>/.opencode
+			outside := conformDir(t, filepath.Dir(c.proj), "outside", filepath.Base(skillsDir))
+			leftover := filepath.Join(outside, ".forge-tmp-9999999-0badf00d-temp-skill")
+			if err := os.WriteFile(leftover, []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Dir(outside), clientDir); err != nil {
+				t.Fatal(err)
+			}
+			p, err = c.plan(t, []adapter.SkillInput{sk})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(p.StaleTemps) != 0 {
+				t.Errorf("listed leftovers behind a symlink: %v", p.StaleTemps)
+			}
+			for _, d := range p.TempDirs {
+				if strings.HasPrefix(d, skillsDir) {
+					t.Errorf("a temp directory below the link is searched: %s", d)
+				}
+			}
+			p.SkipConflicts = true
+			c.apply(t, p, nil)
+			if _, err := os.Stat(leftover); err != nil {
+				t.Errorf("a file behind a symlink was removed: %v", err)
+			}
+		})
+	}
+}
+
+// AC-15 (4c): a read-only managed skill directory is not removed when the skill is
+// no longer wanted (a conflict, no operation).
+func TestSharedStaleSkillReadOnlyIsNotRemoved(t *testing.T) {
+	for _, tg := range conformTargets {
+		t.Run(tg.name, func(t *testing.T) {
+			c := newConformProject(t, tg)
+			sk := conformSkill(t, c.forge, "ro-skill")
+			p, err := c.plan(t, []adapter.SkillInput{sk})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.apply(t, p, nil)
+			target := conformItem(t, p, adapter.KindSkill, "ro-skill").Path
+			if err := os.Chmod(target, 0o555); err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chmod(target, 0o755)
+			p, err = c.plan(t, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			it := conformItem(t, p, adapter.KindSkill, "ro-skill")
+			if it.Action != adapter.ActionConflict || !strings.Contains(it.Reason, "읽기 전용") || opFor(p, target) {
+				t.Fatalf("want a read-only conflict without an operation, got %s %q", it.Action, it.Reason)
+			}
+		})
+	}
+}
+
+// AC-14: a skills directory without search permission is reported as what it is,
+// not as a symbolic link.
+func TestSharedUnreadableSkillsDirIsNotCalledASymlink(t *testing.T) {
+	for _, tg := range conformTargets {
+		t.Run(tg.name, func(t *testing.T) {
+			c := newConformProject(t, tg)
+			sk := conformSkill(t, c.forge, "perm-skill")
+			p, err := c.plan(t, []adapter.SkillInput{sk})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.apply(t, p, nil)
+			skillsDir := filepath.Dir(conformItem(t, p, adapter.KindSkill, "perm-skill").Path)
+			if err := os.Chmod(skillsDir, 0); err != nil {
+				t.Fatal(err)
+			}
+			defer os.Chmod(skillsDir, 0o755)
+			if os.Geteuid() == 0 {
+				t.Skip("root ignores directory permissions")
+			}
+			p, err = c.plan(t, []adapter.SkillInput{sk})
+			if err != nil {
+				t.Skipf("plan refused wholesale: %v", err)
+			}
+			it := conformItem(t, p, adapter.KindSkill, "perm-skill")
+			if it.Action != adapter.ActionConflict || strings.Contains(it.Reason, "심볼릭") {
+				t.Fatalf("want a non-symlink conflict, got %s %q", it.Action, it.Reason)
+			}
+		})
+	}
+}
+
+// AC-9: a skill-tree file with another hard link (to a file outside the tree) is
+// refused: not read, not diffed, not copied into a backup.
+func TestSharedHardLinkedFileInsideSkillTreeIsRefused(t *testing.T) {
+	for _, tg := range conformTargets {
+		t.Run(tg.name, func(t *testing.T) {
+			c := newConformProject(t, tg)
+			sk := conformSkill(t, c.forge, "link-skill")
+			p, err := c.plan(t, []adapter.SkillInput{sk})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.apply(t, p, nil)
+			target := conformItem(t, p, adapter.KindSkill, "link-skill").Path
+			outside := filepath.Join(conformDir(t, filepath.Dir(c.proj), "secretdir"), "data.txt")
+			if err := os.WriteFile(outside, []byte("TOPSECRET-DATA-1234\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Link(outside, filepath.Join(target, "notes.txt")); err != nil {
+				t.Skipf("hard links unsupported: %v", err)
+			}
+			sk2 := conformSkillV(t, c.forge, "link-skill", "2.0.0")
+			for _, force := range []bool{false, true} {
+				p, err := c.plan(t, []adapter.SkillInput{sk2}, func(r *adapter.Request) { r.ForceManaged = force })
+				if err != nil {
+					t.Fatal(err)
+				}
+				it := conformItem(t, p, adapter.KindSkill, "link-skill")
+				if it.Action != adapter.ActionConflict || it.Overridable || opFor(p, target) || !strings.Contains(it.Reason, "하드링크") {
+					t.Fatalf("force=%v: want a hard-link refusal without operation, got %s overridable=%v %q", force, it.Action, it.Overridable, it.Reason)
+				}
+				adapter.BuildDiffs(p)
+				for _, d := range p.Diffs {
+					if strings.Contains(d.Diff, "TOPSECRET") {
+						t.Fatalf("hard-linked content in the diff: %s", d.Diff)
+					}
+				}
+			}
+			// The removal path refuses it as well.
+			p, err = c.plan(t, nil, func(r *adapter.Request) { r.ForceManaged = true })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if opFor(p, target) {
+				t.Fatal("a skill tree with a hard-linked file is in the removal operations")
+			}
+		})
+	}
+}
+
+// AC-14: a claude-code sidecar claim (project scope: a file of the repository, so
+// untrusted) only makes opencode skip a skill while .claude/skills/<name> really
+// exists with Forge's marker; a forged claim cannot keep a skill from being synced.
+func TestOpenCodeForgedClaimDoesNotSkipSkill(t *testing.T) {
+	tg := conformTargets[1]
+	c := newConformProject(t, tg)
+	sk := conformSkill(t, c.forge, "claimed-skill")
+	root, _, err := opencode.New(c.forge).ResolveRoot(adapter.Request{Scope: adapter.ScopeProject, ProjectDir: c.proj, Home: c.home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statePath := claudecode.New(c.forge).StatePath(adapter.ScopeProject, root)
+	conformDir(t, filepath.Dir(statePath))
+	forged := `{"version":1,"target":"claude-code","scope":"project","items":[{"kind":"skill","name":"claimed-skill","hash":"` + strings.Repeat("a", 64) + `","applied_at":"x"}]}`
+	if err := os.WriteFile(statePath, []byte(forged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := c.plan(t, []adapter.SkillInput{sk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := conformItem(t, p, adapter.KindSkill, "claimed-skill"); it.Action != adapter.ActionAdd {
+		t.Fatalf("a forged claim made opencode skip the skill: %s %q", it.Action, it.Reason)
+	}
+	// With the managed directory in place the claim is honoured (control).
+	dir := conformDir(t, root, ".claude", "skills", "claimed-skill")
+	mk := `{"managed_by":"forge","name":"claimed-skill","version":"1.0.0","tree_hash":"x"}`
+	if err := os.WriteFile(filepath.Join(dir, adapter.MarkerName), []byte(mk), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err = c.plan(t, []adapter.SkillInput{sk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := conformItem(t, p, adapter.KindSkill, "claimed-skill"); it.Action != adapter.ActionSkip {
+		t.Fatalf("control: a real claim must skip, got %s %q", it.Action, it.Reason)
+	}
+}
+
+// AC-11 end to end: temp files of a killed process inside a backup directory are
+// listed by the plan and removed by the next apply.
+func TestSharedBackupDirTempsAreListedAndCleaned(t *testing.T) {
+	for _, tg := range conformTargets {
+		t.Run(tg.name, func(t *testing.T) {
+			c := newConformProject(t, tg)
+			sk := conformSkill(t, c.forge, "temps-skill")
+			p, err := c.plan(t, []adapter.SkillInput{sk})
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := c.applyCrashAt(t, p, "journal-written") // killed while the manifest/journal were being written
+			dir := filepath.Join(c.forge, "backups", id)
+			stale := []string{filepath.Join(dir, ".forge-tmp-9999999-0badf00d-manifest.json"), filepath.Join(dir, ".forge-tmp-9999999-0badf00d-journal.json")}
+			for _, f := range stale {
+				if err := os.WriteFile(f, []byte("{"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			p, err = c.plan(t, []adapter.SkillInput{sk})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(p.StaleTemps) != 2 {
+				t.Fatalf("want the two leftovers in the plan, got %v", p.StaleTemps)
+			}
+			res, err := adapter.Apply(context.Background(), c.ad, p, adapter.ApplyOptions{BackupDir: filepath.Join(c.forge, "backups")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.CleanedTemps) != 2 {
+				t.Fatalf("cleaned %v", res.CleanedTemps)
+			}
+			for _, f := range stale {
+				if _, err := os.Lstat(f); err == nil {
+					t.Errorf("%s survived the apply", f)
+				}
+			}
+		})
+	}
+}

@@ -54,6 +54,9 @@ type Manifest struct {
 	// Supersedes lists interrupted syncs (backup ids) that this apply finished.
 	// Restoring this backup also undoes their changes (see Restore).
 	Supersedes []string `json:"supersedes,omitempty"`
+	// RestoreOf is the backup a restore (Kind "restore") was putting back: this
+	// manifest holds the state right before that restore, i.e. a safety backup.
+	RestoreOf string `json:"restore_of,omitempty"`
 }
 
 // BackupInfo is one row of --list-backups.
@@ -142,7 +145,11 @@ func ListBackups(backupDir string) ([]BackupInfo, error) {
 }
 
 // ResolveBackup maps "latest", an exact id or a unique id prefix to a backup id.
-// "latest" is the newest backup that was not rolled back.
+// "latest" is the newest backup that was not rolled back and is not the safety
+// backup of an interrupted restore: that one holds the state from BEFORE the
+// restore, so restoring it would undo the half-finished restore instead of
+// finishing it (the interrupted restore is resumed by running it again, with the
+// id the warning prints).
 func ResolveBackup(backupDir, ref string) (string, error) {
 	all, err := ListBackups(backupDir)
 	if err != nil {
@@ -150,7 +157,7 @@ func ResolveBackup(backupDir, ref string) (string, error) {
 	}
 	if ref == "latest" {
 		for i := len(all) - 1; i >= 0; i-- {
-			if all[i].Error == "" && all[i].Status != StatusRolledBack {
+			if all[i].Error == "" && all[i].Status != StatusRolledBack && !(all[i].Kind == "restore" && all[i].Status == StatusPending) {
 				return all[i].ID, nil
 			}
 		}

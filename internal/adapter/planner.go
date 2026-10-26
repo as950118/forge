@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -44,6 +45,10 @@ type Planner struct {
 	// journals are the believable pending journals of interrupted syncs and
 	// jitems their items (newest journal wins): see Adopt.
 	jitems map[string]StateItem
+	// lost maps kind\x00name to the id of an interrupted sync whose journal copy
+	// (next to the state file) survives but whose backup directory is gone. It is
+	// only used to word conflict reasons: such a journal is never believed.
+	lost map[string]string
 }
 
 // NewPlanner starts a Plan for target a. req.Scope must already be set and root
@@ -111,7 +116,9 @@ func (pl *Planner) Preflight(dirs []string) {
 		}
 	}
 	pl.Plan.TempDirs = out
-	if tmp := FindStaleTemps(pl.Plan.TempDirs); len(tmp) > 0 {
+	tmp := FindStaleTemps(pl.Plan.TempDirs)
+	tmp = append(tmp, FindStaleBackupTemps(pl.Req.BackupDir)...)
+	if len(tmp) > 0 {
 		pl.Plan.StaleTemps = tmp
 	}
 	if pl.Req.BackupDir == "" {
@@ -131,9 +138,66 @@ func (pl *Planner) Preflight(dirs []string) {
 			pl.jitems[it.Kind+"\x00"+it.Name] = it
 		}
 	}
+	pl.detectLostBackup(det)
 	for _, id := range det.Invalid {
 		pl.Note("백업 " + id + " 의 저널이 올바르지 않아(손상 또는 변조) 무시했습니다. 필요하면 forge sync --restore " + id + " 로 되돌리거나 --prune-backups 로 정리하세요")
 	}
+}
+
+// detectLostBackup finds an interrupted sync whose journal copy next to the state
+// file is still there while its backup directory (the other journal copy, the
+// manifest and the originals) has been deleted. Nothing can be finished or rolled
+// back then, and the items that sync wrote are not recorded in the state file, so
+// they would otherwise be reported as "copied from elsewhere" / "user defined".
+// The copy is validated like any journal (same target, scope and root, allowed
+// paths, consistent hashes) but is never used to adopt anything: it only produces
+// the explanation and wording of the conflicts.
+func (pl *Planner) detectLostBackup(det *Detection) {
+	if pl.P.Journal == "" || GuardPath(pl.P.Journal) != nil || CheckNoSymlinks(pl.P.StateBase, pl.P.Journal) != nil {
+		return
+	}
+	b, _, ok, err := ReadFileSafe(pl.P.Journal)
+	if err != nil || !ok {
+		return
+	}
+	var j Journal
+	if json.Unmarshal(b, &j) != nil || j.Status != JournalPending || !validateJournalIdentity(&j) ||
+		j.Root != pl.Plan.Root || j.Scope != pl.Scope || j.Target != pl.A.Name() || validateJournal(pl.A, j.ID, &j) != nil {
+		return
+	}
+	for _, in := range det.Infos {
+		if in.ID == j.ID {
+			return // the backup is there: the normal recovery handles it
+		}
+	}
+	for _, id := range det.Invalid {
+		if id == j.ID {
+			return
+		}
+	}
+	if _, err := loadJournal(pl.Req.BackupDir, j.ID); err == nil {
+		return // present but not pending/believable: reported elsewhere
+	}
+	pl.Plan.LostBackups = append(pl.Plan.LostBackups, j.ID)
+	pl.lost = map[string]string{}
+	for _, it := range j.Items {
+		pl.lost[it.Kind+"\x00"+it.Name] = j.ID
+	}
+	pl.Note("중단된 이전 sync(백업 " + j.ID + ")의 저널 사본은 남아 있지만 그 백업 디렉터리가 삭제되어 이어서 완료하거나 되돌릴 수 없습니다. " +
+		"그 sync 가 만든 항목은 상태 파일에 기록이 없어 관리 항목으로 인정되지 않고 충돌로 표시됩니다(충돌 사유의 \"복사된 디렉터리\"·\"사용자가 정의\" 같은 설명은 이 경우 정확하지 않을 수 있음). " +
+		"--force-managed 는 상태 파일에 기록된 항목만 덮어쓰므로 이 충돌에는 효과가 없습니다. 안전한 해소: ① --skip-conflicts 로 충돌 항목만 제외하고 나머지를 적용하거나, " +
+		"② 해당 항목의 내용을 직접 확인한 뒤 지우거나 이름을 바꾸고 다시 sync 하세요. 다음 --apply 가 쓰기를 마치면 이 저널 사본은 정리됩니다")
+}
+
+// LostBackupReason is the conflict reason for an item the state file does not
+// record when the journal copy of an interrupted sync lists it but that sync's
+// backup is gone ("" when this is not the case).
+func (pl *Planner) LostBackupReason(kind, name string) string {
+	id, ok := pl.lost[kind+"\x00"+name]
+	if !ok {
+		return ""
+	}
+	return "중단된 sync(백업 " + id + ")의 항목일 수 있으나 그 백업이 삭제되어 관리 항목으로 인정할 수 없음. --skip-conflicts 로 제외 (--force-managed 는 효과 없음)"
 }
 
 // Adopt applies the journal of an interrupted sync to one item. When the state

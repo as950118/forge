@@ -68,6 +68,8 @@ type Journal struct {
 	// Items is the content of that state file.
 	Items       []StateItem `json:"items,omitempty"`
 	RecoveredBy string      `json:"recovered_by,omitempty"`
+	// RestoreOf: for a restore, the backup it was putting back (what to run again).
+	RestoreOf string `json:"restore_of,omitempty"`
 }
 
 var hex64Re = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -161,7 +163,7 @@ func journalOpFor(op Op) (JournalOp, error) {
 
 func buildJournal(m *Manifest, ops []Op, meta manifestMeta) (*Journal, error) {
 	j := &Journal{Version: JournalVersion, ID: m.ID, CreatedAt: m.CreatedAt, Kind: m.Kind, Target: m.Target,
-		Scope: m.Scope, Root: m.Root, Status: JournalPending}
+		Scope: m.Scope, Root: m.Root, Status: JournalPending, RestoreOf: m.RestoreOf}
 	for _, op := range ops {
 		jo, err := journalOpFor(op)
 		if err != nil {
@@ -215,6 +217,9 @@ func validateJournal(a Adapter, dirID string, j *Journal) error {
 	}
 	if j.Kind != "sync" && j.Kind != "restore" {
 		return errors.New("저널의 종류가 올바르지 않습니다")
+	}
+	if j.RestoreOf != "" && (j.Kind != "restore" || !backupIDRe.MatchString(j.RestoreOf)) {
+		return errors.New("저널의 복원 대상 id 가 올바르지 않습니다")
 	}
 	if len(j.Ops) > 100000 || len(j.Items) > 100000 {
 		return errors.New("저널이 너무 큽니다")
@@ -285,6 +290,9 @@ type InterruptedInfo struct {
 	Kind      string `json:"kind"`
 	CreatedAt string `json:"created_at"`
 	Ops       int    `json:"ops"`
+	// RestoreOf: for an interrupted restore, the backup it was restoring. THAT id
+	// is what to run again; ID is only the safety backup of the state before it.
+	RestoreOf string `json:"restore_of,omitempty"`
 	// Done are paths already in their final state, Todo still in their original
 	// state, Changed neither (edited since, or in an intermediate state).
 	Done    int `json:"done"`
@@ -350,7 +358,7 @@ func validateJournalIdentity(j *Journal) bool {
 }
 
 func progressOf(j *Journal) InterruptedInfo {
-	info := InterruptedInfo{ID: j.ID, Kind: j.Kind, CreatedAt: j.CreatedAt, Ops: len(j.Ops)}
+	info := InterruptedInfo{ID: j.ID, Kind: j.Kind, CreatedAt: j.CreatedAt, Ops: len(j.Ops), RestoreOf: j.RestoreOf}
 	for _, o := range j.Ops {
 		cur, err := Snapshot(o.Path)
 		switch {

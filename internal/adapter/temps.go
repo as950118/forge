@@ -29,9 +29,66 @@ func tempName(prefix, base string) string {
 	return fmt.Sprintf("%s%d-%s-%s", prefix, os.Getpid(), randHex(4), base)
 }
 
+// A backup directory holds two files written with the same temp-file + rename
+// primitive: manifest.json and journal.json. A sync killed while writing one of
+// them leaves .forge-tmp-<pid>-<8 hex>-manifest.json (or -journal.json) there; no
+// later apply touches that directory again, so they are looked for explicitly.
+// Only those two names are accepted.
+var backupTempRe = regexp.MustCompile(`^\.forge-tmp-(\d{1,7})-[0-9a-f]{8}-(?:manifest|journal)\.json$`)
+
 // staleTempCandidates lists entries of dir that look like our leftovers, without
 // following symbolic links and without touching anything.
-func staleTempCandidates(dir string) []string {
+func staleTempCandidates(dir string) []string { return staleCandidates(dir, tempRe, true) }
+
+// staleBackupTempCandidates lists leftover manifest/journal temp files (regular
+// files only) at the top of every backup directory below backupDir. Links are never
+// followed: neither backupDir's entries nor the temp files themselves.
+func staleBackupTempCandidates(backupDir string) []string {
+	if backupDir == "" {
+		return nil
+	}
+	fi, err := os.Lstat(backupDir)
+	if err != nil || !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
+		return nil
+	}
+	ents, err := os.ReadDir(backupDir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range ents {
+		if !backupIDRe.MatchString(e.Name()) || e.Type()&os.ModeSymlink != 0 || !e.IsDir() {
+			continue
+		}
+		out = append(out, staleCandidates(filepath.Join(backupDir, e.Name()), backupTempRe, false)...)
+	}
+	return out
+}
+
+// FindStaleBackupTemps lists (sorted) the leftover temp files of killed syncs in
+// the backup directories.
+func FindStaleBackupTemps(backupDir string) []string {
+	out := staleBackupTempCandidates(backupDir)
+	sort.Strings(out)
+	return out
+}
+
+// CleanStaleBackupTemps removes what FindStaleBackupTemps lists (the caller holds
+// the sync lock).
+func CleanStaleBackupTemps(backupDir string) []string {
+	var removed []string
+	for _, p := range FindStaleBackupTemps(backupDir) {
+		if li, err := os.Lstat(p); err != nil || !li.Mode().IsRegular() {
+			continue
+		}
+		if os.Remove(p) == nil {
+			removed = append(removed, p)
+		}
+	}
+	return removed
+}
+
+func staleCandidates(dir string, re *regexp.Regexp, allowDirs bool) []string {
 	fi, err := os.Lstat(dir)
 	if err != nil || !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
 		return nil
@@ -42,7 +99,7 @@ func staleTempCandidates(dir string) []string {
 	}
 	var out []string
 	for _, e := range ents {
-		m := tempRe.FindStringSubmatch(e.Name())
+		m := re.FindStringSubmatch(e.Name())
 		if m == nil {
 			continue
 		}
@@ -56,6 +113,9 @@ func staleTempCandidates(dir string) []string {
 			continue // never follow (or delete through) a link
 		}
 		if !li.IsDir() && !li.Mode().IsRegular() {
+			continue
+		}
+		if li.IsDir() && !allowDirs {
 			continue
 		}
 		out = append(out, p)

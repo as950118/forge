@@ -169,7 +169,7 @@ func Restore(ctx context.Context, a Adapter, opts RestoreOptions) (*RestoreResul
 		return res, ErrDrift
 	}
 	if len(ops) > 0 {
-		meta := manifestMeta{Kind: "restore", Target: m.Target, Scope: m.Scope, Root: m.Root, Note: "복원 직전 상태 (복원 대상 백업: " + m.ID + ")"}
+		meta := manifestMeta{Kind: "restore", Target: m.Target, Scope: m.Scope, Root: m.Root, Note: "복원 직전 상태 (복원 대상 백업: " + m.ID + ")", RestoreOf: m.ID}
 		ar, err := applyOps(ctx, a, meta, ops, opts.ApplyOptions)
 		if err != nil {
 			return res, err
@@ -177,6 +177,9 @@ func Restore(ctx context.Context, a Adapter, opts RestoreOptions) (*RestoreResul
 		res.NewBackupID = ar.BackupID
 	}
 	removeCreatedDirs(createdDirs)
+	// This restore finishes an earlier, interrupted restore of the same backup:
+	// the safety backup that one left is no longer a pending interruption.
+	resumeInterruptedRestores(opts.BackupDir, m, res.NewBackupID)
 	// Restoring an interrupted (still pending) backup is the user's choice to roll
 	// it back: it is no longer an interruption the next sync should finish.
 	if j, err := loadJournal(opts.BackupDir, m.ID); err == nil && j.Status == JournalPending {
@@ -300,4 +303,27 @@ func effectiveEntries(a Adapter, backupDir string, m *Manifest, bdir string) ([]
 	}
 	sort.SliceStable(created, func(i, j int) bool { return len(created[i]) < len(created[j]) }) // outermost first
 	return out, created, nil
+}
+
+// resumeInterruptedRestores marks the pending journals of earlier restores of the
+// same backup (same target, scope and root) as recovered by the restore that just
+// completed, so a finished resume does not keep showing up as an interruption.
+func resumeInterruptedRestores(backupDir string, m *Manifest, by string) {
+	ents, err := os.ReadDir(backupDir)
+	if err != nil {
+		return
+	}
+	var ids []string
+	for _, e := range ents {
+		if !backupIDRe.MatchString(e.Name()) || !e.IsDir() || e.Name() == m.ID || e.Name() == by {
+			continue
+		}
+		j, err := loadJournal(backupDir, e.Name())
+		if err != nil || j.Status != JournalPending || j.Kind != "restore" || j.ID != e.Name() ||
+			j.RestoreOf != m.ID || j.Target != m.Target || j.Scope != m.Scope || j.Root != m.Root {
+			continue
+		}
+		ids = append(ids, e.Name())
+	}
+	_ = recoverJournals(backupDir, ids, by)
 }

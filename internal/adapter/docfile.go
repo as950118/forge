@@ -1,8 +1,10 @@
 package adapter
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/heonjinjeong/forge/internal/adapter/jsonedit"
 	"github.com/heonjinjeong/forge/internal/textsafe"
@@ -27,12 +29,15 @@ func LoadDoc(root, path string, newMode os.FileMode) (*DocFile, error) {
 	d := &DocFile{Path: path, Mode: newMode}
 	if err := CheckNoSymlinks(root, path); err != nil {
 		d.Blocked = "심볼릭 링크 경로라 따라가지 않고 거부합니다"
+		if !errors.Is(err, ErrSymlink) { // e.g. a directory without search permission: not a link
+			d.Blocked = "경로를 확인할 수 없어 거부합니다 (권한 또는 파일 시스템 오류: " + MaskLine(textsafe.Display(err.Error(), 160)) + ")"
+		}
 		d.Cur = []byte("{}\n")
 		return d, nil
 	}
 	b, fi, ok, err := ReadFileSafe(path)
 	if err != nil {
-		return nil, fmt.Errorf("%s 를 읽을 수 없습니다: %s", textsafe.Display(path, 200), textsafe.Display(err.Error(), 200))
+		return nil, readError(path, err)
 	}
 	d.Snap, err = Snapshot(path)
 	if err != nil {
@@ -63,3 +68,24 @@ func (d *DocFile) Op() (Op, bool) {
 	}
 	return Op{Kind: OpWriteFile, Path: d.Path, Data: d.Cur, Mode: d.Mode, Before: d.Snap, BeforeData: d.Orig}, true
 }
+
+// readError words a ReadFileSafe failure. Its own errors already end with the
+// path, so the path is not printed a second time; a message without the path gets
+// it as a prefix. The advice of a hard-link refusal comes first, so only the tail
+// (the path) is ever cut by the display limit.
+func readError(path string, err error) error {
+	if strings.Contains(err.Error(), path) {
+		return &readFailure{msg: textsafe.Display(err.Error(), 400), err: err}
+	}
+	return &readFailure{msg: textsafe.Display(path, 200) + " 를 읽을 수 없습니다: " + textsafe.Display(err.Error(), 200), err: err}
+}
+
+// readFailure keeps the sanitized message but still unwraps to the cause
+// (errors.Is(err, ErrHardLinked) / ErrSymlink for callers such as doctor).
+type readFailure struct {
+	msg string
+	err error
+}
+
+func (e *readFailure) Error() string { return e.msg }
+func (e *readFailure) Unwrap() error { return e.err }

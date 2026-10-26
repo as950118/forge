@@ -70,7 +70,24 @@ func CheckNoSymlinks(root, path string) error {
 // secret files, so every file read through ReadFileSafe (settings and config
 // documents, state files, markers) must be the only name of its content. This
 // holds for plan, apply and restore alike because all of them read through here.
-var ErrHardLinked = errors.New("하드링크된 설정 파일은 지원하지 않습니다(다른 파일과 같은 내용을 공유함)")
+//
+// The remedy comes first and the path (appended by the callers, once) last, so a
+// long path can never cut the advice off.
+var ErrHardLinked = errors.New("링크를 풀고 복사본으로 교체하세요(cp 로 만든 파일로 바꾸기). 하드링크된 설정 파일은 지원하지 않습니다(다른 파일과 같은 내용을 공유함)")
+
+// checkTreeFile refuses a skill-tree file that has other names (st_nlink > 1) or
+// is another guarded file: a Forge-managed skill directory must not be able to
+// show or copy the content of a file that lives elsewhere (~/.ssh, a data
+// directory) through a hard link. rel is the slash path inside the tree.
+func checkTreeFile(g *fileGuard, fi os.FileInfo, rel string) error {
+	if err := g.check(fi); err != nil {
+		return err
+	}
+	if linkCount(fi) > 1 {
+		return fmt.Errorf("%w: %s", ErrHardLinked, rel)
+	}
+	return nil
+}
 
 // ReadFileSafe reads a regular file without following a symlink at the final
 // component. A missing file returns (nil, false, nil).
@@ -127,7 +144,8 @@ func TreeHash(root string, skipMarker bool) (string, []TreeFile, error) {
 			return nil
 		}
 		if fi, e := d.Info(); e == nil && d.Type().IsRegular() {
-			if e := guard.check(fi); e != nil {
+			rel, _ := filepath.Rel(root, p)
+			if e := checkTreeFile(guard, fi, filepath.ToSlash(rel)); e != nil {
 				return e
 			}
 		}
@@ -314,7 +332,7 @@ func copyTree(src, dst string, dirMode fs.FileMode, fileMode func(rel string, sr
 		if err != nil {
 			return err
 		}
-		if err := guard.check(fi); err != nil {
+		if err := checkTreeFile(guard, fi, relSlash); err != nil {
 			return err
 		}
 		in, err := os.Open(p)

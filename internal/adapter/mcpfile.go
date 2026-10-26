@@ -365,6 +365,9 @@ func (pl *Planner) PlanMCPFile(f MCPFile, t MCPTarget) (changed bool, err error)
 			if pl.JournalListed(KindMCP, e.Name) {
 				reason = "중단된 이전 sync 가 쓴 항목이지만 그 뒤 내용이 수정되어 관리 항목으로 인정하지 않습니다 (" + why + ")"
 			}
+			if r := pl.LostBackupReason(KindMCP, e.Name); r != "" {
+				reason = r
+			}
 			it.Action, it.Reason = ActionConflict, reason
 			pl.Item(it)
 		default:

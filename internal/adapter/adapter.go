@@ -155,6 +155,9 @@ type Plan struct {
 	Interrupted []InterruptedInfo `json:"interrupted,omitempty"`
 	// RecoverIDs are the believable pending journals Apply marks recovered.
 	RecoverIDs []string `json:"-"`
+	// LostBackups are interrupted syncs whose journal copy next to the state file
+	// exists but whose backup directory is gone (see Planner.detectLostBackup).
+	LostBackups []string `json:"-"`
 	// InvalidJournals are pending journals that were ignored (unreadable or forged).
 	InvalidJournals []string `json:"-"`
 	// StaleTemps are leftover temporary files of killed syncs; Apply (with the

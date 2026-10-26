@@ -21,6 +21,9 @@ import (
 type FileDiff struct {
 	Path string `json:"path"`
 	Diff string `json:"diff"`
+	// SecretChanges counts changed lines whose only difference is a masked secret
+	// value: the diff cannot show them (both sides read "***"), so it says so.
+	SecretChanges int `json:"secret_changes,omitempty"`
 }
 
 // Display limits: diffs are for humans, never a data channel.
@@ -41,12 +44,12 @@ func BuildDiffs(p *Plan) {
 		if total >= maxDiffLinesTotal {
 			return
 		}
-		d := unifiedDiff(path, before, after, hasBefore, hasAfter)
+		d, hidden := unifiedDiff(path, before, after, hasBefore, hasAfter)
 		if d == "" {
 			return
 		}
 		total += strings.Count(d, "\n")
-		p.Diffs = append(p.Diffs, FileDiff{Path: textsafe.Display(path, 300), Diff: d})
+		p.Diffs = append(p.Diffs, FileDiff{Path: textsafe.Display(path, 300), Diff: d, SecretChanges: hidden})
 	}
 	for _, op := range p.Ops {
 		switch op.Kind {
@@ -106,6 +109,11 @@ func readTreeFiles(root string, exists bool) map[string][]byte {
 		if err != nil {
 			return nil
 		}
+		if linkCount(fi) > 1 {
+			// Another name for the same content (maybe ~/.ssh/...): never read it.
+			out[rel] = []byte(hardLinkedMark)
+			return nil
+		}
 		if fi.Size() > maxDiffFileBytes {
 			out[rel] = []byte(fmt.Sprintf("\x00large:%d", fi.Size()))
 			return nil
@@ -117,6 +125,10 @@ func readTreeFiles(root string, exists bool) map[string][]byte {
 	})
 	return out
 }
+
+// hardLinkedMark stands in for the content of a skill-tree file that has more than
+// one hard link (the file is not read; the NUL byte makes it "not text").
+const hardLinkedMark = "\x00hardlinked"
 
 func isText(b []byte) bool {
 	return len(b) <= maxDiffFileBytes && !bytes.Contains(b, []byte{0}) && utf8.Valid(b)
@@ -136,7 +148,7 @@ type diffOp struct {
 	text string
 }
 
-func unifiedDiff(path string, before, after []byte, hasBefore, hasAfter bool) string {
+func unifiedDiff(path string, before, after []byte, hasBefore, hasAfter bool) (string, int) {
 	var sb strings.Builder
 	from, to := path, path
 	if !hasBefore {
@@ -147,16 +159,30 @@ func unifiedDiff(path string, before, after []byte, hasBefore, hasAfter bool) st
 	}
 	fmt.Fprintf(&sb, "--- %s\n+++ %s\n", textsafe.Display(from, 300), textsafe.Display(to, 300))
 	if !isText(before) || !isText(after) {
-		sb.WriteString("(텍스트가 아니거나 너무 커서 내용 비교를 생략합니다)\n")
-		return sb.String()
+		if string(before) == hardLinkedMark || string(after) == hardLinkedMark {
+			sb.WriteString("(하드링크된 파일이라 내용을 읽지 않고 비교를 생략합니다)\n")
+		} else {
+			sb.WriteString("(텍스트가 아니거나 너무 커서 내용 비교를 생략합니다)\n")
+		}
+		return sb.String(), 0
 	}
 	isJSON := strings.HasSuffix(path, ".json") || filepath.Base(path) == MarkerName
+	rawBefore, rawAfter := before, after
 	if isJSON {
 		// Mask by JSON value before diffing (see MaskJSONDisplay): the display copies
 		// keep every line, so context lines of a one-line user file are covered too.
 		before, after = []byte(MaskJSONDisplay(string(before))), []byte(MaskJSONDisplay(string(after)))
 	}
 	ops := diffLines(splitLines(before), splitLines(after))
+	hidden := 0
+	if isJSON {
+		hidden = hiddenSecretChanges(rawBefore, rawAfter, ops)
+	}
+	secretNote := func() {
+		if hidden > 0 {
+			fmt.Fprintf(&sb, "(비밀 값 변경: %d줄 — 값은 가려져 위 diff 에 나타나지 않습니다)\n", hidden)
+		}
+	}
 	masker := newMasker(isJSON)
 	for i := range ops {
 		ops[i].text = masker.line(ops[i].text)
@@ -209,7 +235,8 @@ func unifiedDiff(path string, before, after []byte, hasBefore, hasAfter bool) st
 		for k := i; k < j; k++ {
 			if lines >= maxDiffLinesFile {
 				fmt.Fprintf(&sb, "(… 이후 줄 생략: 파일당 %d줄 제한)\n", maxDiffLinesFile)
-				return sb.String()
+				secretNote()
+				return sb.String(), hidden
 			}
 			sb.WriteString(string(ops[k].kind))
 			sb.WriteString(textsafe.Display(ops[k].text, maxDiffLineBytes))
@@ -220,7 +247,35 @@ func unifiedDiff(path string, before, after []byte, hasBefore, hasAfter bool) st
 		newN += nc
 		i = j
 	}
-	return sb.String()
+	secretNote()
+	return sb.String(), hidden
+}
+
+// hiddenSecretChanges counts the changed lines of the real (unmasked) diff that
+// the masked diff does not contain: lines that differ only in a secret value
+// become identical once masked and so vanish from the diff.
+func hiddenSecretChanges(rawBefore, rawAfter []byte, maskedOps []diffOp) int {
+	count := func(ops []diffOp) (minus, plus int) {
+		for _, o := range ops {
+			switch o.kind {
+			case '-':
+				minus++
+			case '+':
+				plus++
+			}
+		}
+		return
+	}
+	rm, rp := count(diffLines(splitLines(rawBefore), splitLines(rawAfter)))
+	mm, mp := count(maskedOps)
+	h := rm - mm
+	if d := rp - mp; d > h {
+		h = d
+	}
+	if h < 0 {
+		return 0
+	}
+	return h
 }
 
 // diffLines is an LCS line diff with common prefix/suffix trimming. Very large
@@ -300,6 +355,75 @@ var (
 
 const maskedValue = "***"
 
+var (
+	camelBoundary = regexp.MustCompile(`([a-z0-9])([A-Z])`)
+	plainFlagName = regexp.MustCompile(`^--?[A-Za-z0-9_.-]+$`)
+)
+
+// benignDisplayKeys contain a secret-looking substring (AUTH, KEY) but are ordinary
+// words: `authors` / `keywords` of a package or skill description must stay readable.
+// A real secret value under such a key is still caught by the value-pattern rules.
+// Display only; the registry-side rule (mcp.LooksSecret) is not affected.
+var benignDisplayKeys = map[string]bool{"author": true, "authors": true, "authority": true, "keyword": true, "keywords": true}
+
+// shortSecretWords are secret key/flag words too short for the substring rule of
+// mcp.LooksSecret: they only count as a whole word (`pwd`, `db_pw`, `rootPass`;
+// not `bypass`).
+var shortSecretWords = map[string]bool{"pw": true, "pwd": true, "pass": true, "passcode": true}
+
+func keyWords(s string) []string {
+	s = camelBoundary.ReplaceAllString(s, "$1-$2")
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+	})
+}
+
+// secretDisplayKey reports whether the value under this JSON key is masked in a
+// diff: the registry's key-name rule, plus short names (`pwd`, `pw`), minus the
+// ordinary words of benignDisplayKeys.
+func secretDisplayKey(key string) bool {
+	if benignDisplayKeys[strings.ToLower(key)] {
+		return false
+	}
+	if mcp.LooksSecret(key) {
+		return true
+	}
+	for _, w := range keyWords(key) {
+		if shortSecretWords[w] {
+			return true
+		}
+	}
+	return false
+}
+
+// secretFlag reports whether the argument after this array element is a secret:
+// "--token", "--api-key", "--pwd", and "-p" (docker/mysql style password flag;
+// a port after "-p" is masked too - display only).
+func secretFlag(s string) bool {
+	if !strings.HasPrefix(s, "-") || strings.Contains(s, "=") {
+		return false
+	}
+	if flagKeyRe.MatchString(s) || strings.EqualFold(s, "-p") {
+		return true
+	}
+	for _, w := range keyWords(strings.TrimLeft(s, "-")) {
+		if shortSecretWords[w] {
+			return true
+		}
+	}
+	return false
+}
+
+// maskFlagValue masks the value of a one-string "--flag=value" argument whose flag
+// takes a secret ("--pwd=hunter2"); the references ${VAR}/{env:VAR} stay.
+func maskFlagValue(s string) (string, bool) {
+	name, val, ok := strings.Cut(s, "=")
+	if !ok || val == "" || wholeRef.MatchString(val) || !plainFlagName.MatchString(name) || !secretFlag(name) {
+		return "", false
+	}
+	return name + "=" + maskedValue, true
+}
+
 // MaskJSONDisplay returns a display copy of JSON text in which every string VALUE
 // whose key name looks secret (TOKEN, SECRET, PASSWORD, KEY, AUTH, COOKIE,
 // CREDENTIAL ..., any case, any spelling such as camelCase) is replaced by "***",
@@ -347,12 +471,17 @@ func MaskJSONDisplay(src string) string {
 				switch {
 				case top.maskNext:
 					mask, top.maskNext = true, false
-				case top.secret || (top.key != "" && mcp.LooksSecret(top.key)):
+				case top.secret || (top.key != "" && secretDisplayKey(top.key)):
 					mask = true
 				}
 				if !top.obj && !mask {
 					u := unescapeJSONString(content)
-					top.maskNext = flagKeyRe.MatchString(u) && !strings.Contains(u, "=")
+					if repl, ok := maskFlagValue(u); ok {
+						out.WriteString(`"` + repl + `"`)
+						i = j + 1
+						continue
+					}
+					top.maskNext = secretFlag(u)
 				}
 				if mask && (wholeRef.MatchString(content) || strings.ContainsAny(content, "\r\n")) {
 					mask = false
@@ -367,14 +496,15 @@ func MaskJSONDisplay(src string) string {
 			continue
 		case '{':
 			top := stack[len(stack)-1]
-			stack = append(stack, &frame{obj: true, expectKey: true, secret: top.secret || (top.key != "" && mcp.LooksSecret(top.key))})
+			stack = append(stack, &frame{obj: true, expectKey: true, secret: top.secret || (top.key != "" && secretDisplayKey(top.key))})
 		case '[':
 			top := stack[len(stack)-1]
-			stack = append(stack, &frame{key: top.key, secret: top.secret || (top.key != "" && mcp.LooksSecret(top.key))})
+			stack = append(stack, &frame{key: top.key, secret: top.secret || (top.key != "" && secretDisplayKey(top.key))})
 		case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 			// A number inside a secret subtree (a PIN, a code) is masked as well. The
 			// token is replaced by a string literal: display only, one line stays one line.
-			if top := stack[len(stack)-1]; top.secret && !(top.obj && top.expectKey) {
+			// Also a number that is the direct value of a secret-looking key ("pin": 1234).
+			if top := stack[len(stack)-1]; !(top.obj && top.expectKey) && (top.secret || (top.obj && top.key != "" && secretDisplayKey(top.key))) {
 				j := i + 1
 				for j < n && strings.IndexByte("0123456789+-.eE", src[j]) >= 0 {
 					j++
@@ -399,6 +529,11 @@ func MaskJSONDisplay(src string) string {
 		return src
 	}
 	return out.String()
+}
+
+func flagEqMasked(s string) string {
+	r, _ := maskFlagValue(s)
+	return r
 }
 
 func unescapeJSONString(content string) string {
@@ -429,7 +564,7 @@ func (m *masker) line(s string) string {
 	}
 	if sm := kvLineRe.FindStringSubmatch(s); sm != nil {
 		key, val := sm[2], sm[3]
-		if mcp.LooksSecret(key) && !wholeRef.MatchString(val) {
+		if secretDisplayKey(key) && !wholeRef.MatchString(val) {
 			m.maskNext = false
 			return sm[1] + `"` + maskedValue + `"` + sm[4]
 		}
@@ -447,7 +582,7 @@ func (m *masker) line(s string) string {
 	}
 	m.maskNext = false
 	if len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' && !strings.Contains(trimmed[1:len(trimmed)-1], `"`) {
-		if inner := trimmed[1 : len(trimmed)-1]; flagKeyRe.MatchString(inner) && !strings.Contains(inner, "=") {
+		if inner := trimmed[1 : len(trimmed)-1]; secretFlag(inner) {
 			m.maskNext = true
 		}
 	}
@@ -472,6 +607,8 @@ func (m *masker) line(s string) string {
 			b.WriteString(lit)
 		case mcp.LooksSecretValue(inner):
 			b.WriteString(`"` + maskedValue + `"`)
+		case flagEqMasked(inner) != "":
+			b.WriteString(`"` + flagEqMasked(inner) + `"`)
 		default:
 			b.WriteString(`"` + ledger.MaskInline(inner) + `"`)
 		}
