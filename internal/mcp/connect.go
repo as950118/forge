@@ -216,14 +216,7 @@ func (c *Conn) Alive() bool {
 func (c *Conn) Sanitize(s string) string { return sanitize(s, c.secrets) }
 
 // Mask masks resolved secret values without shortening or flattening the text.
-func (c *Conn) Mask(s string) string {
-	for sec := range c.secrets {
-		if sec != "" {
-			s = strings.ReplaceAll(s, sec, "***")
-		}
-	}
-	return s
-}
+func (c *Conn) Mask(s string) string { return maskText(s, c.secrets) }
 
 // Stderr returns the sanitized tail of the child's stderr ("" for http/sse).
 func (c *Conn) Stderr() string {

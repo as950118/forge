@@ -54,6 +54,7 @@ var (
 	camelRe   = regexp.MustCompile(`([a-z0-9])([A-Z])`)
 	headerKV  = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9-]*):\s*(\S.*)$`)
 	portRe    = regexp.MustCompile(`^\d{1,5}(:\d{1,5})?$`)
+	numericRe = regexp.MustCompile(`^\d[\d.:]*$`) // 8080, 3.12, 8080:80
 )
 
 // entropyThreshold (bits/char) for long opaque tokens. English-like hyphenated
@@ -404,7 +405,7 @@ func checkURLSecrets(u *url.URL) error {
 // flag-name classification -------------------------------------------------
 
 var (
-	secretWords = map[string]bool{"token": true, "secret": true, "password": true, "passwd": true, "pass": true, "pwd": true,
+	secretWords = map[string]bool{"token": true, "secret": true, "secrets": true, "password": true, "passwords": true, "passwd": true, "pass": true, "pwd": true,
 		"passphrase": true, "apikey": true, "auth": true, "authorization": true, "credential": true, "credentials": true,
 		"cookie": true, "bearer": true, "signature": true}
 	// Suffix / prefix words meaning the flag does not carry the secret itself.
@@ -418,8 +419,14 @@ func flagWords(name string) []string {
 	return strings.FieldsFunc(strings.ToLower(name), func(r rune) bool { return r == '-' || r == '_' || r == '.' })
 }
 
+// lastWordSecrets are words that mean a credential only as the LAST word of a
+// flag name (--jwt, --github-pat, --api-key): elsewhere they are about something
+// else (--jwt-issuer, --jwt-algorithm, --key-file, --keyboard).
+var lastWordSecrets = map[string]bool{"key": true, "jwt": true, "pat": true}
+
 // secretFlagName reports whether a long flag name (e.g. "--api-key") normally
-// carries a credential.
+// carries a credential. "--tokens" alone does too, but it is also a count in LLM
+// tools (--max-tokens, --tokens 500): flagTakesSecret exempts numeric values.
 func secretFlagName(name string) bool {
 	w := flagWords(name)
 	if len(w) == 0 || notValueLast[w[len(w)-1]] || notValueFirst[w[0]] {
@@ -430,7 +437,29 @@ func secretFlagName(name string) bool {
 			return true
 		}
 	}
-	return w[len(w)-1] == "key"
+	return lastWordSecrets[w[len(w)-1]] || (len(w) == 1 && w[0] == "tokens")
+}
+
+// flagTakesSecret is secretFlagName for a flag whose value is known.
+func flagTakesSecret(name, val string) bool {
+	if !secretFlagName(name) {
+		return false
+	}
+	if w := flagWords(name); len(w) == 1 && w[0] == "tokens" && numericRe.MatchString(val) {
+		return false
+	}
+	return true
+}
+
+// attachedPassword: `-pVALUE` (mysql style, value glued to the flag). Ports
+// (-p8080, -p8080:80), versions (-p3.12) and paths pass. Residual risk: compiler
+// flags such as -pthread look like a password and are refused.
+func attachedPassword(a string) bool {
+	if len(a) < 3 || a[0] != '-' || a[1] != 'p' || a[2] == '-' || a[2] == '=' {
+		return false
+	}
+	v := a[2:]
+	return !isRefOnly(v) && !numericRe.MatchString(v) && !strings.ContainsAny(v, `/\`)
 }
 
 func argErr(idx int, what string) error {
@@ -447,13 +476,16 @@ func checkArg(idx int, a string, afterHashFlag bool) error {
 	if strings.HasPrefix(a, "-") {
 		name, val, hasVal := strings.Cut(a, "=")
 		if hasVal && val != "" && !isRefOnly(val) {
-			if secretFlagName(name) || name == "-p" {
+			if flagTakesSecret(name, val) || name == "-p" {
 				return argErr(idx, fmt.Sprintf("%s 에 비밀 값이 지정되어 있습니다", name))
 			}
 			// --env=KEY=VAL, --header=Name: value, --url=https://..., ...
 			if err := checkArgValue(idx, val, hashName(name)); err != nil {
 				return err
 			}
+		}
+		if attachedPassword(a) {
+			return argErr(idx, "-p 에 붙여 쓴 값이 비밀번호처럼 보입니다")
 		}
 		return nil
 	}
@@ -508,7 +540,7 @@ func CheckArgs(args []string) error {
 			if next == "" || strings.HasPrefix(next, "-") || isRefOnly(next) {
 				continue
 			}
-			if secretFlagName(a) {
+			if flagTakesSecret(a, next) {
 				return argErr(i, fmt.Sprintf("%s 다음 인자에 비밀 값이 지정되어 있습니다", a))
 			}
 			// `-p VALUE`: ports (-p 8080) and paths pass, anything else is treated as a password.

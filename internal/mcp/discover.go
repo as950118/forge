@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,8 +12,10 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -295,6 +298,40 @@ func toolChange(name, kind, baseline string, approved bool, oldDesc, newDesc, ol
 	return c
 }
 
+// minEncodedSecret: shorter secrets are masked only verbatim (their base64 or
+// URL-escaped forms are short enough to collide with ordinary text).
+const minEncodedSecret = 8
+
+// SecretForms returns a resolved secret together with the forms in which a
+// server commonly echoes it back: standard and URL-safe base64 (padded and raw)
+// and URL escaping (query and path). It is a bounded set (at most 7 strings per
+// secret). NOT covered: a secret embedded inside a larger base64/URL-encoded text
+// (the encoding of the whole differs by alignment), hex, double encoding.
+func SecretForms(v string) []string {
+	out := []string{v}
+	if len(v) < minEncodedSecret {
+		return out
+	}
+	b := []byte(v)
+	for _, f := range []string{
+		base64.StdEncoding.EncodeToString(b), base64.RawStdEncoding.EncodeToString(b),
+		base64.URLEncoding.EncodeToString(b), base64.RawURLEncoding.EncodeToString(b),
+		url.QueryEscape(v), url.PathEscape(v),
+	} {
+		if f != "" && !slices.Contains(out, f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// addSecret records a resolved secret and its echo forms for masking.
+func addSecret(secrets map[string]bool, v string) {
+	for _, f := range SecretForms(v) {
+		secrets[f] = true
+	}
+}
+
 // maskText replaces every resolved secret value in s with "***" (longest first,
 // so a secret that contains another one is replaced as a whole).
 func maskText(s string, secrets map[string]bool) string {
@@ -383,7 +420,7 @@ func resolveValues(vals []Value, secrets map[string]bool) (map[string]map[string
 			if !ok || s == "" {
 				return nil, &failure{class: ClassEnvMissing, msg: fmt.Sprintf("%s %s 가 참조하는 환경변수 %s 가 설정되어 있지 않습니다", slotLabel(v.Slot), v.Key, v.Ref)}
 			}
-			secrets[s] = true
+			addSecret(secrets, s)
 		default:
 			// TODO(keychain): resolve via macOS `security`.
 			return nil, &failure{class: ClassExecFailed, msg: fmt.Sprintf("%s %s: keychain 참조는 아직 지원하지 않습니다", slotLabel(v.Slot), v.Key)}
@@ -499,7 +536,7 @@ func discover(parent context.Context, in *Info, vals map[string]map[string]strin
 func classifyLimited(lim *lineLimit, ctx context.Context, err error, in *Info, dt *diagTransport, stderr string, secrets map[string]bool, timeout time.Duration) *failure {
 	if lim != nil && lim.exceeded() {
 		return &failure{ClassProtocol,
-			sanitize(fmt.Sprintf("서버가 줄바꿈 없이 %d MiB 를 초과하는 출력을 보내 중단했습니다 (프로토콜 위반)", maxStdoutLine>>20), secrets),
+			sanitize(fmt.Sprintf("MCP 서버 %q 가 stdout 한 줄(JSON-RPC 메시지 하나, 예: tools/list 응답)에 상한 %d MiB 를 넘는 데이터를 보내 연결을 끊었습니다. 도구 설명·스키마를 줄이거나 서버를 나눠 등록하세요 (줄바꿈 없이 출력이 계속되는 서버도 같은 오류입니다)", textsafe.Display(in.Name, 60), maxStdoutLine>>20), secrets),
 			sanitize(err.Error(), secrets)}
 	}
 	return classify(ctx, err, in, dt, stderr, secrets, timeout)
@@ -558,12 +595,7 @@ func classify(ctx context.Context, err error, in *Info, dt *diagTransport, stder
 
 // sanitize redacts resolved secret values and bounds the message length.
 func sanitize(s string, secrets map[string]bool) string {
-	for sec := range secrets {
-		if sec != "" {
-			s = strings.ReplaceAll(s, sec, "***")
-		}
-	}
-	s = oneLine(s)
+	s = oneLine(maskText(s, secrets))
 	if utf8.RuneCountInString(s) > maxMessage {
 		s = string([]rune(s)[:maxMessage-1]) + "…"
 	}

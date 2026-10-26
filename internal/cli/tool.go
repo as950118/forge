@@ -162,7 +162,7 @@ func toolAddCmd() *cobra.Command {
 				}
 				def.Values = append(def.Values, v)
 			}
-			if err := def.Validate(); err != nil {
+			if err := def.ValidateNew(); err != nil {
 				return err
 			}
 			reg, closeFn, err := openTool(cmd)

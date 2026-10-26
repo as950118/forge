@@ -207,6 +207,21 @@ func (d *Definition) Validate() error {
 	return d.validateValues()
 }
 
+// ValidateNew is Validate plus the registration-only checks (never run on
+// stored definitions): a ${ENV}-style reference in a command tool's argv is not
+// expanded by Forge (no shell), so the program would receive the literal text.
+func (d *Definition) ValidateNew() error {
+	if err := d.Validate(); err != nil {
+		return err
+	}
+	if d.Kind == KindCommand && !d.Shell {
+		if i := mcp.ArgRefIndex(d.Command, d.Args); i >= 0 {
+			return fmt.Errorf("argv #%d 에 ${ENV} 형태의 참조가 있습니다. 도구는 셸 없이 실행되어 Forge 가 ${...} 를 확장하지 않으므로 프로그램이 글자 그대로 받습니다. %s", i+2, mcp.ArgRefAdvice)
+		}
+	}
+	return nil
+}
+
 // ValidateExec re-checks the execution-relevant policy of command/script
 // definitions (shell ban, deny list, allowlist consistency, interpreter rules)
 // on a copy-safe subset: Run calls it on every run so a tampered DB row or a
