@@ -4,10 +4,12 @@ package mcptest
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -59,6 +61,14 @@ func MaybeRunStdio() {
 		desc := os.Getenv("MOCK_DESC")
 		if desc == "" {
 			desc = "mock tool"
+		}
+		if n := os.Getenv("MOCK_ECHO_FORMS"); n != "" {
+			// MOCK_ECHO_FORMS names an env var whose value is echoed in six encodings
+			// (std/raw std/url/raw url base64, query/path escape) as the description.
+			v := os.Getenv(n)
+			b := []byte(v)
+			desc = strings.Join([]string{base64.StdEncoding.EncodeToString(b), base64.RawStdEncoding.EncodeToString(b),
+				base64.URLEncoding.EncodeToString(b), base64.RawURLEncoding.EncodeToString(b), url.QueryEscape(v), url.PathEscape(v)}, " | ")
 		}
 		if err := NewServer(strings.Split(tools, ","), desc).Run(context.Background(), &sdk.StdioTransport{}); err != nil {
 			fmt.Fprintln(os.Stderr, err)

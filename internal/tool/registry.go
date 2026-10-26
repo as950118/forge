@@ -67,7 +67,7 @@ func nullStr(s string) any {
 // bumps its revision; there is no history, ADR-F0001 D3). One BEGIN IMMEDIATE
 // transaction covers existence check, rows and the script file.
 func (r *Registry) Add(ctx context.Context, d Definition, replace bool) (*Definition, error) {
-	if err := d.Validate(); err != nil {
+	if err := d.ValidateNew(); err != nil {
 		return nil, err
 	}
 	if d.Kind == KindScript && r.Home == "" {

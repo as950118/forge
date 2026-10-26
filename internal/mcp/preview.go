@@ -178,6 +178,16 @@ func firstOperand(args []string, valueFlags map[string]bool) (int, bool) {
 	return 0, false
 }
 
+// isShellScript reports whether the command is a shell given a command string
+// (sh -c '...'): the shell, not Forge or the client, interprets the argument.
+func isShellScript(cmd string, args []string) bool {
+	switch baseName(cmd) {
+	case "sh", "bash", "zsh", "dash", "ksh", "fish", "cmd", "powershell", "pwsh":
+		return hasFlag(args, "-c", "/c", "/C", "-Command", "-command", "-lc") || len(args) > 0 && args[0] == "-c"
+	}
+	return false
+}
+
 func hasFlag(args []string, flags ...string) bool {
 	for _, a := range args {
 		for _, f := range flags {
@@ -267,6 +277,57 @@ func dockerPin(image string) string {
 	return "tag"
 }
 
+// pinTarget strips a trailing version/tag/range from a package or image spec so
+// that the advice can show "<name>@<버전>".
+func pinTarget(runner, pkg string) string {
+	if strings.HasPrefix(runner, "docker") || strings.HasPrefix(runner, "podman") {
+		if i := strings.Index(pkg, "@sha256:"); i >= 0 {
+			pkg = pkg[:i]
+		}
+		if i := strings.LastIndexByte(pkg, ':'); i > strings.LastIndexByte(pkg, '/') {
+			pkg = pkg[:i]
+		}
+		return pkg
+	}
+	if pkg == "" || strings.Contains(pkg, "://") {
+		return "<패키지>"
+	}
+	for _, scheme := range []string{"npm:", "jsr:"} { // deno specifiers: keep the scheme
+		if strings.HasPrefix(pkg, scheme) {
+			return scheme + pinTarget(runner, strings.TrimPrefix(pkg, scheme))
+		}
+	}
+	for _, sep := range []string{"==", "@", ">", "<", "~", "!"} {
+		if i := strings.Index(pkg[1:], sep); i >= 0 { // [1:]: skip the "@" of a scope
+			return pkg[:i+1]
+		}
+	}
+	return pkg
+}
+
+// pinAdvice is the per-runner how-to of the unpinned-package warning. Syntax
+// that rests on the runner's documentation rather than a check against an
+// installed binary is marked "미확인" where it is version dependent.
+func pinAdvice(runner, pkg string) string {
+	n := safeText(pinTarget(runner, pkg), 100)
+	switch {
+	case strings.HasPrefix(runner, "docker"), strings.HasPrefix(runner, "podman"):
+		return fmt.Sprintf("이미지를 정확한 태그(%s:<버전>) 또는 다이제스트(%s@sha256:<64자 hex>)로 쓰세요. 태그는 다시 가리켜질 수 있어 다이제스트가 더 확실합니다. 다이제스트는 이미지를 받은 뒤 `%s inspect --format '{{index .RepoDigests 0}}' <이미지>` 로 확인합니다.", n, n, strings.Fields(runner)[0])
+	case runner == "uvx", runner == "uv tool run":
+		return fmt.Sprintf("`%s==<버전>` 으로 고정하세요 (예: forge mcp add NAME -- uvx %s==1.2.3). `%s@<버전>` 형태는 uv 버전에 따라 다를 수 있어 미확인입니다. 사용 가능한 버전은 PyPI 에서 확인합니다.", n, n, n)
+	case runner == "pipx run":
+		return fmt.Sprintf("`pipx run --spec '%s==<버전>' <실행 파일>` 또는 `pipx run '%s==<버전>'` 로 고정하세요 (후자는 pipx 버전에 따라 미확인). 사용 가능한 버전은 PyPI 에서 확인합니다.", n, n)
+	case runner == "deno run":
+		switch {
+		case strings.HasPrefix(n, "npm:"), strings.HasPrefix(n, "jsr:"):
+			return fmt.Sprintf("`%s@<버전>` 처럼 specifier 에 정확한 버전을 넣으세요.", n)
+		}
+		return "URL 경로에 정확한 버전을 포함하세요 (예: .../pkg@1.2.3/mod.ts)."
+	default: // npx, bunx, pnpm dlx, yarn dlx, bun x, npm exec
+		return fmt.Sprintf("`%s@<정확한 버전>` 으로 고정하세요 (예: %s %s@1.2.3). 최신 버전은 `npm view %s version` 으로 확인합니다. @latest·^범위·태그는 고정이 아닙니다.", n, runner, n, n)
+	}
+}
+
 func analyzeStdio(p *Preview, s Spec, warn, note func(string, ...any)) {
 	cmd, args := s.Command, s.Args
 	b := baseName(cmd)
@@ -289,6 +350,9 @@ func analyzeStdio(p *Preview, s Spec, warn, note func(string, ...any)) {
 			note("%s 가 로컬 경로 %q 를 실행합니다 (파일 내용은 검사하지 않음)", runner, safeText(pkg, 120))
 		case "pinned":
 			note("%s 패키지 %q 는 버전이 고정되어 있습니다 (패키지 내용 자체는 검사하지 않음)", runner, safeText(pkg, 120))
+		}
+		if pin == "unpinned" || pin == "range" || pin == "tag" {
+			note("고정 방법: %s", pinAdvice(runner, pkg))
 		}
 	}
 	npmLike := func(runner string, rest []string, valueFlags map[string]bool) {
@@ -418,9 +482,12 @@ func analyzeStdio(p *Preview, s Spec, warn, note func(string, ...any)) {
 			}
 		}
 	case "sh", "bash", "zsh", "dash", "ksh", "fish", "cmd", "powershell", "pwsh":
-		if hasFlag(args, "-c", "/c", "/C", "-Command", "-command", "-lc") || len(args) > 0 && args[0] == "-c" {
+		if isShellScript(cmd, args) {
 			warn("셸(%s)이 명령 문자열을 실행합니다: 파이프·치환 등 임의의 셸 구문이 가능하므로 문자열 전체를 읽어 보세요.", b)
 		}
+	}
+	if i := ArgRefIndex(cmd, args); i >= 0 {
+		warn("인자 #%d 에 ${...} 참조가 있습니다: 게이트웨이·refresh 는 확장하지 않아 서버가 글자 그대로 받고, Claude Code 직접 노출만 확장하며 OpenCode 직접 노출은 sync 에서 거부됩니다. --env KEY='${ENV_NAME}' 또는 래퍼 스크립트를 쓰세요.", i+1)
 	}
 	for _, a := range args {
 		if regexp.MustCompile(`\|\s*(?:ba|z)?sh\b|curl\s|wget\s`).MatchString(a) {

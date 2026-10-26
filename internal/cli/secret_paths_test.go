@@ -79,3 +79,32 @@ func TestSecretHeuristicPerRegistrationCallSite(t *testing.T) {
 		}
 	}
 }
+
+// TASK-0017 AC-1: ${ENV} in stdio args registers (HEAD behaviour; Claude Code
+// expands it) but the preview warns prominently, also with --preview; --strict
+// still needs approval like for every registration.
+func TestMCPAddWarnsOnEnvRefInArgs(t *testing.T) {
+	forgeHome(t)
+	_, errOut, err := runSplit(t, "", "mcp", "add", "--preview", "envarg", "--", "node", "server.js", "--root=${ROOT}")
+	if err != nil || !strings.Contains(errOut, "인자 #2 에 ${...} 참조") || !strings.Contains(errOut, "--env") {
+		t.Errorf("--preview: want warning, err=%v\n%s", err, errOut)
+	}
+	if list := mustRun(t, "mcp", "list"); strings.Contains(list, "envarg") {
+		t.Errorf("--preview registered something:\n%s", list)
+	}
+	_, errOut, err = runSplit(t, "", "mcp", "add", "envarg", "--", "node", "server.js", "--root=${ROOT}")
+	if err != nil || !strings.Contains(errOut, "인자 #2 에 ${...} 참조") {
+		t.Errorf("add: must register with a warning, err=%v\n%s", err, errOut)
+	}
+	if list := mustRun(t, "mcp", "list"); !strings.Contains(list, "envarg") {
+		t.Errorf("not registered:\n%s", list)
+	}
+	if _, _, err = runSplit(t, "", "mcp", "add", "envstrict", "--strict", "--", "node", "--root=${ROOT}"); err == nil {
+		t.Error("--strict without approval must refuse (non-interactive, no --yes)")
+	}
+	// The pin how-to reaches the preview of an unpinned runner (defaults unchanged: no prompt).
+	_, errOut, err = runSplit(t, "", "mcp", "add", "pinme", "--", "npx", "-y", "some-pkg")
+	if err != nil || !strings.Contains(errOut, "고정 방법:") || !strings.Contains(errOut, "some-pkg@<정확한 버전>") {
+		t.Errorf("pin guidance missing (err=%v):\n%s", err, errOut)
+	}
+}

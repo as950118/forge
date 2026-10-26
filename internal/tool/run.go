@@ -204,10 +204,12 @@ type masker struct {
 }
 
 func (m *masker) add(v string) {
-	if len(v) >= 4 {
-		m.mu.Lock()
-		m.vals = append(m.vals, v)
-		m.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, f := range mcp.SecretForms(v) {
+		if len(f) >= 4 {
+			m.vals = append(m.vals, f)
+		}
 	}
 }
 

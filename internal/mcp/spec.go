@@ -136,6 +136,34 @@ func ParseValue(slot, kv string) (Value, error) {
 	return Value{Slot: slot, Key: key, IsSecret: false, RefType: RefLiteral, Literal: val, Display: val}, nil
 }
 
+// argSubstRe matches the reference syntaxes that clients expand but Forge does
+// not: ${VAR} / ${VAR:-default} (Claude Code) and {env:VAR} / {file:path} (OpenCode).
+var argSubstRe = regexp.MustCompile(`\$\{[^}]*\}|\{(?:env|file):[^}]*\}`)
+
+// ArgRefIndex returns the index of the first argument that holds a ${ENV}-style
+// reference Forge will not expand, or -1. Forge starts the program itself
+// (forge mcp refresh, gateway, forge tool) and passes arguments verbatim, so the
+// child receives the literal text, while a client that renders an MCP server
+// directly may expand it (Claude Code expands ${VAR} in args per
+// docs/clients/claude-code.md; OpenCode uses {env:VAR} and sync refuses it).
+// Arguments of `sh -c <script>` are exempt: the shell expands them itself.
+// It is a registration-time finding (mcp add warns, tool add refuses), never part
+// of Validate, so stored definitions keep rendering and running.
+func ArgRefIndex(command string, args []string) int {
+	if isShellScript(command, args) {
+		return -1
+	}
+	for i, a := range args {
+		if argSubstRe.MatchString(a) {
+			return i
+		}
+	}
+	return -1
+}
+
+// ArgRefAdvice is the shared remedy text (the argument itself is never echoed).
+const ArgRefAdvice = "값은 --env KEY='${ENV_NAME}' 로 환경변수에 담아 프로그램이 환경변수에서 읽게 하거나, 환경변수를 읽어 실행하는 래퍼 스크립트를 command 로 등록하세요"
+
 // errValueLooksSecret never includes the value.
 func errValueLooksSecret(slot, key string) error {
 	return fmt.Errorf("%s %s: 값이 비밀(토큰/키)처럼 보여 literal 로 저장할 수 없습니다 (평문 저장 금지). 값은 환경변수에 넣고 %s=${ENV_NAME} 참조를 사용하세요", slotLabel(slot), key, key)

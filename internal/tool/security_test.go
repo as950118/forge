@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/url"
 	"os"
@@ -348,4 +349,50 @@ func asArgsError(err error, target **ArgsError) bool {
 	ae, ok := err.(*ArgsError)
 	*target = ae
 	return ok
+}
+
+// TASK-0017 AC-4: tool output masks base64 / URL-escaped echoes of a resolved secret.
+func TestMaskerCoversEncodedEchoes(t *testing.T) {
+	const sec = "Zk9/Wq+7=pa$$word-abc"
+	m := &masker{}
+	m.add(sec)
+	for _, e := range []string{sec, base64.StdEncoding.EncodeToString([]byte(sec)), url.QueryEscape(sec)} {
+		if got := m.mask("x " + e + " y"); strings.Contains(got, e) {
+			t.Errorf("echo %.8s... not masked: %q", e, got)
+		}
+	}
+}
+
+// TASK-0017 AC-1: Forge never expands ${ENV} in a command tool's argv, so
+// registration refuses it (argv numbered like the other tool messages) ...
+func TestCommandToolRefusesEnvRefInArgv(t *testing.T) {
+	r, _ := newReg(t)
+	_, err := r.Add(context.Background(), cmdDef("envarg", "ls", "-l", "${HOME}"), false)
+	if err == nil || !strings.Contains(err.Error(), "argv #3") || !strings.Contains(err.Error(), "확장하지 않") || !strings.Contains(err.Error(), "--env") {
+		t.Errorf("argv ${HOME} must be refused with guidance: %v", err)
+	}
+	// a shell tool is exempt (the shell expands it)
+	if _, err := r.Add(context.Background(), Definition{Name: "shok", Kind: KindCommand, Description: "x", Shell: true, Command: "sh",
+		Args: []string{"-c", `echo "${HOME}"`}}, false); err != nil {
+		t.Errorf("shell tool: %v", err)
+	}
+}
+
+// ... but only at registration: a row stored by an older version still resolves
+// and runs, and the program receives the literal text.
+func TestStoredToolWithEnvRefInArgvStillRuns(t *testing.T) {
+	r, _ := newReg(t)
+	d := cmdDef("old", "printf", "x")
+	d.Policy.WorkingDir = t.TempDir()
+	mustAdd(t, r, d)
+	r.mustExec(t, `UPDATE tools SET args=? WHERE name=?`, `["%s","${FORGE_TEST_LITERAL}"]`, "old")
+	got, err := r.Resolve(context.Background(), "old")
+	if err != nil {
+		t.Fatalf("stored definition must still resolve: %v", err)
+	}
+	t.Setenv("FORGE_TEST_LITERAL", "EXPANDED")
+	res, err := Run(context.Background(), got, map[string]any{"v": "x"})
+	if err != nil || !res.OK || !strings.Contains(res.Stdout, "${FORGE_TEST_LITERAL}") || strings.Contains(res.Stdout, "EXPANDED") {
+		t.Errorf("run: err=%v res=%+v", err, res)
+	}
 }
