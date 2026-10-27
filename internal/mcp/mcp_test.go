@@ -17,11 +17,12 @@ import (
 
 	"github.com/heonjinjeong/forge/internal/mcp/mcptest"
 	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/heonjinjeong/forge/internal/testenv"
 )
 
 func TestMain(m *testing.M) {
 	mcptest.MaybeRunStdio()
-	os.Exit(m.Run())
+	os.Exit(testenv.Run(m))
 }
 
 func newReg(t *testing.T) (*Registry, string) {

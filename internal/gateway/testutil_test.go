@@ -18,12 +18,13 @@ import (
 	"github.com/heonjinjeong/forge/internal/mcp/mcptest"
 	"github.com/heonjinjeong/forge/internal/skill"
 	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/heonjinjeong/forge/internal/testenv"
 	"github.com/heonjinjeong/forge/internal/tool"
 )
 
 func TestMain(m *testing.M) {
 	mcptest.MaybeRunStdio()
-	os.Exit(m.Run())
+	os.Exit(testenv.Run(m))
 }
 
 type env struct {

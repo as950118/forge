@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 	"unicode"
+
+	"github.com/heonjinjeong/forge/internal/testenv"
 )
 
 // These tests never run a real claude or opencode: every binary here is a small
@@ -23,7 +25,7 @@ import (
 // TestTimeoutKillsProcessGroup).
 func TestMain(m *testing.M) {
 	Timeout = 60 * time.Second
-	os.Exit(m.Run())
+	os.Exit(testenv.Run(m))
 }
 
 func skipWindows(t *testing.T) {

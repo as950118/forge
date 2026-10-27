@@ -10,6 +10,7 @@ import (
 
 	"github.com/heonjinjeong/forge/internal/clientver"
 	"github.com/heonjinjeong/forge/internal/mcp/mcptest"
+	"github.com/heonjinjeong/forge/internal/testenv"
 )
 
 func TestMain(m *testing.M) {
@@ -20,7 +21,7 @@ func TestMain(m *testing.M) {
 	versionChecker = func(dirs []string) *clientver.Checker {
 		return &clientver.Checker{PathEnv: "/nonexistent-forge-test-path", ProjectDirs: dirs, Runner: neverRunner{}}
 	}
-	os.Exit(m.Run())
+	os.Exit(testenv.Run(m))
 }
 
 // neverRunner fails the test run if anything tries to execute a client.

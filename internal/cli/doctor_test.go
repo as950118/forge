@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/heonjinjeong/forge/internal/textsafe"
 )
 
 type docCheck struct {
@@ -170,13 +171,66 @@ func TestDoctorFreshHomeIsInfoNotFailure(t *testing.T) {
 	}
 }
 
+// reportPath is what doctor prints for a path: it cuts at 300 characters
+// (textsafe.Display), so expectations must not depend on how long TMPDIR is.
+func reportPath(p string) string { return textsafe.Display(p, 300) }
+
+// longDir makes a directory below base whose total path is about n characters
+// (below SQLite's 512 limit), whatever TMPDIR is.
+func longDir(t *testing.T, base string, n int) string {
+	t.Helper()
+	d := base
+	for len(d) < n {
+		d = filepath.Join(d, strings.Repeat("d", min(60, n-len(d)-1)))
+	}
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// The report cuts paths at 300 characters. This test builds its own long project
+// and home paths (independent of TMPDIR and of testenv) and checks the cut.
+func TestDoctorReportCutsLongPaths(t *testing.T) {
+	forgeHome(t)
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	proj := longDir(t, filepath.Join(base, "p"), 330)
+	home := longDir(t, filepath.Join(base, "h"), 330)
+	if err := os.MkdirAll(filepath.Join(proj, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("FORGE_HOME", filepath.Join(longDir(t, filepath.Join(base, "f"), 320), ".forge"))
+	mustRun(t, "init")
+	out, err := runErr(t, "", "doctor", "--json", "--project-dir", proj)
+	if err != nil {
+		t.Logf("doctor: %v", err)
+	}
+	var r docReport
+	if jerr := json.Unmarshal([]byte(out), &r); jerr != nil {
+		t.Fatalf("not JSON: %v", jerr)
+	}
+	for name, p := range map[string]string{"project": proj, "home": os.Getenv("FORGE_HOME")} {
+		if len(p) <= 300 {
+			t.Fatalf("test setup: %s path is only %d characters", name, len(p))
+		}
+		got := r.Project
+		if name == "home" {
+			got = r.Home
+		}
+		if got != textsafe.Display(p, 300) || len([]rune(got)) > 300 || got == p {
+			t.Errorf("%s: got %d characters %q, want the 300-character cut of the path", name, len([]rune(got)), got)
+		}
+	}
+}
+
 func TestDoctorHealthyEnvironmentAndJSONSchema(t *testing.T) {
 	e := newSyncEnv(t)
 	mustRun(t, "mcp", "expose", "gw-srv", "--client", "claude-code", "--mode", "direct") // no gateway-only server without a cache
 	e.applyAll(t)
 	_ = os.Chmod(e.homeForge(), 0o700)
 	r := e.mustDoctor(t)
-	if r.Schema != 1 || r.Scope != "project" || r.Strict || r.ExitCode != 0 || r.Project != e.proj || r.Home != e.homeForge() {
+	if r.Schema != 1 || r.Scope != "project" || r.Strict || r.ExitCode != 0 || r.Project != reportPath(e.proj) || r.Home != reportPath(e.homeForge()) {
 		t.Fatalf("%+v", r)
 	}
 	for _, id := range []string{"home.dir", "db.perm", "db.integrity", "db.migrations", "db.wal", "drift.claude-code.project", "drift.opencode.project",
@@ -1001,9 +1055,14 @@ func TestDoctorLargeInputsStayFast(t *testing.T) {
 	start := time.Now()
 	r := e.mustDoctor(t)
 	// The point is "no blow-up on large inputs" (4-5s without -race here), not a
-	// speed record: the race detector and a busy host multiply the time, so the
-	// limit is generous and 3x larger under -race.
-	limit := 20 * time.Second
+	// speed record. Correctness (the 300000 rows are counted, below) is always
+	// asserted. The time bound is loose by default (~12x the idle time, 3x more
+	// under -race: a busy host multiplies it, and a real blow-up is orders of
+	// magnitude); FORGE_PERF_TESTS=1 uses the tight bound for an idle machine.
+	limit := 60 * time.Second
+	if os.Getenv("FORGE_PERF_TESTS") == "1" {
+		limit = 10 * time.Second
+	}
 	if raceEnabled {
 		limit *= 3
 	}

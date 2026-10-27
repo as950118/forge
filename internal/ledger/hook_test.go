@@ -14,8 +14,12 @@ import (
 	"github.com/heonjinjeong/forge/internal/store"
 )
 
+// hookOpts gives tests a generous per-hook timeout: the production 2s budget is a
+// policy (DefaultHookTimeout), not something correctness tests should depend on
+// when the host is loaded. Tests of the timeout itself set their own value, and
+// FORGE_PERF_TESTS=1 turns the strict budget back on in TestHookConcurrent32.
 func hookOpts(home string) HookOptions {
-	return HookOptions{Client: ClientClaudeCode, Home: home}
+	return HookOptions{Client: ClientClaudeCode, Home: home, Timeout: 30 * time.Second}
 }
 
 func payload(m map[string]any) *strings.Reader {
@@ -153,7 +157,7 @@ func TestHookTimeouts(t *testing.T) {
 	start := time.Now()
 	o := hookOpts(home)
 	o.Timeout = 200 * time.Millisecond
-	if err := IngestHook(br, o); err == nil || time.Since(start) > 2*time.Second {
+	if err := IngestHook(br, o); err == nil || time.Since(start) > 10*time.Second {
 		t.Errorf("blocked stdin: err=%v after %v", err, time.Since(start))
 	}
 	// database write-locked by someone else for longer than the timeout
@@ -169,13 +173,25 @@ func TestHookTimeouts(t *testing.T) {
 	defer tx.Rollback()
 	start = time.Now()
 	err = IngestHook(payload(map[string]any{"hook_event_name": "PreToolUse", "tool_name": "Skill", "session_id": "s", "tool_use_id": "t", "tool_input": map[string]any{"skill": "x"}}), o)
-	if err == nil || time.Since(start) > 2*time.Second {
+	if err == nil || time.Since(start) > 10*time.Second {
 		t.Errorf("locked db: err=%v after %v", err, time.Since(start))
 	}
 }
 
 func TestHookConcurrent32(t *testing.T) {
 	rec, home := newRec(t)
+	// Correctness (all 32 hooks recorded, no loss or duplicate) is always asserted.
+	// Speed: a loose 10x bound by default (a busy host or -race multiplies the
+	// time); FORGE_PERF_TESTS=1 restores the strict production budget (2s).
+	opts := hookOpts(home)
+	wall := 20 * time.Second
+	if os.Getenv("FORGE_PERF_TESTS") == "1" {
+		opts.Timeout = DefaultHookTimeout
+		wall = DefaultHookTimeout
+	} else {
+		opts.Timeout = 20 * time.Second
+	}
+	began := time.Now()
 	var wg sync.WaitGroup
 	errs := make(chan error, 64)
 	for i := 0; i < 32; i++ {
@@ -184,7 +200,7 @@ func TestHookConcurrent32(t *testing.T) {
 			defer wg.Done()
 			for _, evn := range []string{"PreToolUse", "PostToolUse"} {
 				err := IngestHook(payload(map[string]any{"hook_event_name": evn, "session_id": "cs", "tool_name": "mcp__srv__t",
-					"tool_use_id": fmt.Sprintf("toolu_%d", i), "tool_input": map[string]any{"i": i}}), hookOpts(home))
+					"tool_use_id": fmt.Sprintf("toolu_%d", i), "tool_input": map[string]any{"i": i}}), opts)
 				if err != nil {
 					errs <- err
 				}
@@ -192,14 +208,18 @@ func TestHookConcurrent32(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+	elapsed := time.Since(began)
 	close(errs)
 	for err := range errs {
 		t.Error(err)
 	}
-	var n, ok int
-	_ = rec.DB.QueryRow(`SELECT count(*), count(ok) FROM ledger`).Scan(&n, &ok)
-	if n != 32 || ok != 32 {
-		t.Errorf("rows=%d with ok=%d", n, ok)
+	var n, ok, distinct int
+	_ = rec.DB.QueryRow(`SELECT count(*), count(ok), count(DISTINCT tool_use_id) FROM ledger`).Scan(&n, &ok, &distinct)
+	if n != 32 || ok != 32 || distinct != 32 {
+		t.Errorf("rows=%d with ok=%d, distinct tool_use_id=%d", n, ok, distinct)
+	}
+	if elapsed > wall {
+		t.Errorf("32 concurrent hooks took %v (limit %v)", elapsed, wall)
 	}
 }
 
