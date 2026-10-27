@@ -252,3 +252,36 @@ func TestIngestHookRecoversPanic(t *testing.T) {
 		t.Fatal("IngestHook did not return after panic")
 	}
 }
+
+func TestHookDurationDecodingIsLenient(t *testing.T) {
+	rec, home := newRec(t)
+	ctx := context.Background()
+	cwd := t.TempDir()
+	// Raw JSON so that 1e999 (overflows float64) reaches the decoder as written.
+	for i, d := range []string{`1e999`, `"87"`, `-5`, `null`, `{"a":1}`, `12.6`} {
+		raw := fmt.Sprintf(`{"hook_event_name":"PostToolUse","session_id":"s","cwd":%q,"tool_name":"Skill","tool_use_id":"t%d","tool_input":{"skill":"lenient-%d"},"duration_ms":%s}`, cwd, i, i, d)
+		if err := IngestHook(strings.NewReader(raw), hookOpts(home)); err != nil {
+			t.Fatalf("duration_ms=%s dropped the payload: %v", d, err)
+		}
+	}
+	rows, err := rec.Recent(ctx, 20, Filter{})
+	if err != nil || len(rows) != 6 {
+		t.Fatalf("rows=%d err=%v", len(rows), err)
+	}
+	for _, r := range rows {
+		switch r.Name {
+		case "lenient-5":
+			if r.LatencyMS == nil || *r.LatencyMS != 13 {
+				t.Errorf("12.6 -> %v", r.LatencyMS)
+			}
+		default:
+			if r.LatencyMS != nil {
+				t.Errorf("%s: latency=%d, want NULL", r.Name, *r.LatencyMS)
+			}
+		}
+	}
+	// A structurally broken payload is still rejected.
+	if err := IngestHook(strings.NewReader(`{"hook_event_name":`), hookOpts(home)); err == nil {
+		t.Error("broken JSON accepted")
+	}
+}

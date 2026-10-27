@@ -596,10 +596,29 @@ func TestMaskKeyAndInlineHardening(t *testing.T) {
 			t.Errorf("key %q not masked: %v", k, v)
 		}
 	}
-	// Documented limit: a Cyrillic homoglyph key is not recognized by name.
-	m = mask(`{"p\u0430ssword":"short"}`)
-	if m["p\u0430ssword"] != "short" {
-		t.Logf("homoglyph limit changed: %v", m)
+	// (d) TASK-0019: separators, combining accents, Cyrillic/Greek look-alikes.
+	m = mask(`{"pass-word":"s1","pass_word":"s2","pass word":"s3","pass.word":"s4","pa\u0301ssword":"s5","p\u0430ssword":"s6","\u03c1assword":"s7","t\u043ek\u0435n":"s8","API-KEY":"s9","pass\u2010word":"t1","pass\u2212word":"t2","pass\u00a0word":"t3","pass\u2011word":"t4","pass\u203fword":"t5","pass\u3000word":"t6","safe":"v","passage":"p1","compass":"p2","bypass":"p3"}`)
+	for k, v := range m {
+		switch k {
+		case "safe", "passage", "compass", "bypass":
+			continue
+		}
+		if v != "***" {
+			t.Errorf("key %q not masked: %v", k, v)
+		}
+	}
+	for _, k := range []string{"passage", "compass", "bypass"} {
+		if m[k] == "***" {
+			t.Errorf("false positive on %q", k)
+		}
+	}
+	if m["safe"] != "v" {
+		t.Errorf("safe key changed: %v", m)
+	}
+	// Documented limit: a look-alike outside the small confusables table is not recognized.
+	m = mask(`{"pass\u04cfword":"short"}`)
+	if m["pass\u04cfword"] != "short" {
+		t.Logf("confusables limit changed: %v", m)
 	}
 }
 

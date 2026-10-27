@@ -92,6 +92,8 @@
 - 사용자 `/명령` 입력: `user` 레코드 content 에 `<command-name>/xxx</command-name><command-message>..</command-message><command-args>..</command-args>` 태그 (관찰 사례는 `/model`; 스킬 슬래시 호출이 같은 형태인지는 [미확인]).
 - hook 경로 [doc]: `PreToolUse`/`PostToolUse` 를 `Skill` 도구에 매칭하면 모델 호출만 잡힌다(`tool_input.skill` 필드명은 transcript 로 확인했으나 hook 문서에는 명시 없음 -> hook 에서의 실제 payload [미확인]). `/skillname` 직접 입력은 PreToolUse 를 우회하므로 `UserPromptExpansion`(matcher=스킬/명령 이름)으로 잡아야 한다.
 
+- UserPromptExpansion payload (TASK-0019 AC-1, 부분 완료): 문서에서 확인되는 것은 matcher 가 명령/스킬 이름이라는 점뿐이다. payload 의 필드명(`command_name` 이 payload 키인지, 스킬 vs 일반 명령 구분 필드, 인자 필드)과 `tool_use_id` 유무는 실제 payload 를 캡처하지 못해 **[미확인]** 이다(실제 claude 실행 불가). 따라서 `invocation=user` 기록은 구현하지 않았고(`internal/ledger/hook.go` 의 `TODO(UserPromptExpansion)` 유지), 픽스처를 캡처한 뒤 구현한다. 그때까지 사용자 `/스킬명` 호출은 이력에 잡히지 않는 것이 알려진 한계다.
+
 결론(R3): **식별 가능.** (a) transcript 의 `tool_use name="Skill"`(+`input.skill`) 파싱, (b) hook `PreToolUse|PostToolUse` matcher `Skill` + `UserPromptExpansion`. 모델이 SKILL.md 를 Read 로 직접 읽는 우회 경로는 별도이며 이 경로는 식별 불가/불확실. "스킬 사용"의 1차 신호는 `Skill` 도구 호출로 정의 가능.
 
 ## Forge 어댑터 설계 시사점

@@ -416,7 +416,13 @@ func TestMissesSeparatePerServerAndExcludeUnknown(t *testing.T) {
 	home, rw := newHome(t)
 	rec := &ledger.SQLite{DB: rw}
 	ev := func(kind, name, server, client string, ts int64) ledger.Event {
-		return ledger.Event{TS: time.UnixMilli(ts), Kind: kind, Name: name, MCPServer: server, Client: client, SessionID: "s", Source: "hook"}
+		e := ledger.Event{TS: time.UnixMilli(ts), Kind: kind, Name: name, MCPServer: server, Client: client, SessionID: "s", Source: "hook"}
+		if kind == "mcp" {
+			// An unregistered MCP server is no miss by itself (TASK-0019); an explicit
+			// found=false keeps this per-server grouping test meaningful.
+			e.Found = ledger.Bool(false)
+		}
+		return e
 	}
 	for i, e := range []ledger.Event{
 		ev("skill", "ghost", "", "claude-code", 1000),
@@ -457,11 +463,12 @@ func TestMissesSeparatePerServerAndExcludeUnknown(t *testing.T) {
 	if len(mcp) != 2 || mcp[0].MCPServer != "user_b" || mcp[0].Count != 2 || mcp[1].MCPServer != "user_a" || mcp[1].Count != 1 {
 		t.Errorf("mcp misses must be per server ('-' = '_'): %+v", mcp)
 	}
-	// the schema view folds both servers together; this is the limit we avoid
-	var folded int
-	_ = db.QueryRow(`SELECT miss_count FROM v_misses WHERE kind='mcp' AND name='search'`).Scan(&folded)
-	if folded != 3 {
-		t.Errorf("v_misses folded count %d", folded)
+	// since migration 0003 the schema view separates MCP servers as well
+	var vA, vB int
+	_ = db.QueryRow(`SELECT miss_count FROM v_misses WHERE kind='mcp' AND mcp_server='user_a'`).Scan(&vA)
+	_ = db.QueryRow(`SELECT miss_count FROM v_misses WHERE kind='mcp' AND mcp_server='user_b'`).Scan(&vB)
+	if vA != 1 || vB != 1 { // '-' vs '_' spellings stay distinct rows in the view; the Go query merges them
+		t.Errorf("v_misses per server: user_a=%d user_b=%d", vA, vB)
 	}
 	since := int64(2500)
 	late, _ := Misses(ctx, db, Filter{Kind: "skill", Since: &since}, 50)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/heonjinjeong/forge/internal/ledger"
 )
@@ -113,5 +114,25 @@ func TestHookIngestRecoversPanic(t *testing.T) {
 	out, errOut, err = hookRun(t, "{}", args...)
 	if err != nil || out != "" || !strings.Contains(errOut, "panic") {
 		t.Errorf("debug: err=%v stdout=%q stderr=%q", err, out, errOut)
+	}
+}
+
+func TestHookTimeoutFromEnv(t *testing.T) {
+	cases := []struct {
+		in   string
+		want time.Duration
+		ok   bool
+	}{
+		{"", 0, false}, {"abc", 0, false}, {"0", 0, false}, {"-5", 0, false}, {"-99999999999999999999", 0, false},
+		{"100x", 0, false}, {"1.5", 0, false},
+		{"1", time.Millisecond, true}, {"500", 500 * time.Millisecond, true},
+		{"10000", 10 * time.Second, true}, {"10001", 10 * time.Second, true},
+		{"99999999999999999999", 10 * time.Second, true},
+	}
+	for _, c := range cases {
+		d, ok := hookTimeoutFromEnv(c.in)
+		if d != c.want || ok != c.ok {
+			t.Errorf("%q -> %v,%v want %v,%v", c.in, d, ok, c.want, c.ok)
+		}
 	}
 }

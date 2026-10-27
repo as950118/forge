@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -43,11 +45,8 @@ func hookIngestCmd() *cobra.Command {
 				}
 			}()
 			opts := ledger.HookOptions{Client: client, Event: event}
-			if v := os.Getenv("FORGE_HOOK_TIMEOUT_MS"); v != "" {
-				var ms int
-				if _, err := fmt.Sscanf(v, "%d", &ms); err == nil && ms > 0 && ms <= 10000 {
-					opts.Timeout = time.Duration(ms) * time.Millisecond
-				}
+			if d, ok := hookTimeoutFromEnv(os.Getenv("FORGE_HOOK_TIMEOUT_MS")); ok {
+				opts.Timeout = d
 			}
 			if err := ingestHook(cmd.InOrStdin(), opts); err != nil {
 				hookDebug(cmd, err)
@@ -61,6 +60,29 @@ func hookIngestCmd() *cobra.Command {
 		return nil
 	})
 	return cmd
+}
+
+// maxHookTimeoutMS is the upper bound of FORGE_HOOK_TIMEOUT_MS.
+const maxHookTimeoutMS = 10000
+
+// hookTimeoutFromEnv parses FORGE_HOOK_TIMEOUT_MS. Non-numeric (including
+// trailing garbage), zero and negative values are ignored (default timeout);
+// values above 10000 are clamped to 10000.
+func hookTimeoutFromEnv(v string) (time.Duration, bool) {
+	ms, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+	if err != nil {
+		if ne, ok := err.(*strconv.NumError); !ok || ne.Err != strconv.ErrRange || strings.HasPrefix(strings.TrimSpace(v), "-") {
+			return 0, false
+		}
+		ms = maxHookTimeoutMS // positive overflow
+	}
+	if ms <= 0 {
+		return 0, false
+	}
+	if ms > maxHookTimeoutMS {
+		ms = maxHookTimeoutMS
+	}
+	return time.Duration(ms) * time.Millisecond, true
 }
 
 func hookDebug(cmd *cobra.Command, err error) {

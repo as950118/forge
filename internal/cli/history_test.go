@@ -302,18 +302,18 @@ func TestSkillMissesAndFalsePositives(t *testing.T) {
 	if len(recent) != 1 || recent[0].(map[string]any)["count"] != float64(1) {
 		t.Errorf("since 7d: %v", recent)
 	}
-	// history misses: per kind, and MCP per server
+	// history misses: the user-attached MCP server is no longer a miss (TASK-0019)
 	all := jsonOut(t, "history", "misses", "--json")["misses"].([]any)
-	if len(all) != 2 {
+	if len(all) != 1 {
 		t.Errorf("history misses: %v", all)
 	}
 	mcp := jsonOut(t, "history", "misses", "--kind", "mcp", "--json")["misses"].([]any)
-	if len(mcp) != 1 || mcp[0].(map[string]any)["mcp_server"] != "attached_by_user" {
+	if len(mcp) != 0 {
 		t.Errorf("mcp misses: %v", mcp)
 	}
-	text := mustRun(t, "history", "misses", "--kind", "mcp")
-	if !strings.Contains(text, "미등록 호출 이름") || !strings.Contains(text, "거짓 양성") {
-		t.Errorf("%s", text)
+	text := mustRun(t, "history", "misses")
+	if !strings.Contains(text, "miss 로 세지 않습니다") || !strings.Contains(text, "found=0 으로 명시한") || strings.Contains(text, "거짓 양성") {
+		t.Errorf("history misses note: %s", text)
 	}
 }
 
