@@ -19,8 +19,11 @@ import (
 
 // Error classes recorded in the ledger (error_class) for gateway-level failures.
 const (
-	classNotFound    = "not_found"
-	classDisabled    = "disabled"
+	classNotFound = "not_found"
+	classDisabled = "disabled"
+	// classHidden marks a call to a name that IS registered but is not exposed to this
+	// client (profile allow list, per-client exposure setting). It is not a miss.
+	classHidden      = "hidden_by_profile"
 	classDenied      = "denied"
 	classConfirm     = "confirm_refused"
 	classNoElicit    = "confirm_unsupported"
@@ -150,7 +153,9 @@ func (g *Gateway) callTool(ctx context.Context, ss *sdk.ServerSession, p *sdk.Ca
 	}
 	e := cat.byName[p.Name]
 	if e == nil {
-		g.recordUnknown(ctx, client, version, p.Name)
+		if class := g.recordUnknown(ctx, client, version, p.Name); class != "" {
+			return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: fmt.Sprintf("등록된 도구이지만 이 클라이언트에는 노출되지 않습니다 (%s): \"%s\". 프로필·노출 설정(forge profile, forge mcp expose)을 확인하거나 forge_list 로 사용 가능한 도구를 확인하세요", hiddenReason(class), cleanName(p.Name))}
+		}
 		return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: fmt.Sprintf("알 수 없는 도구입니다 (노출되지 않았거나 비활성): \"%s\". forge_list 로 사용 가능한 도구를 확인하세요", cleanName(p.Name))}
 	}
 	c := g.beginFor(client, version, e, p.Arguments)
@@ -202,20 +207,41 @@ const maxUnknownRows = 100
 // (deduplicated by sanitized name, at most maxUnknownRows rows per session; only
 // rows that were really written use up a slot); a name of neither shape is not
 // recorded. The name is sanitized exactly once, by cleanName.
-func (g *Gateway) recordUnknown(ctx context.Context, client, version, name string) {
-	if tl, ok := g.registeredTool(ctx, name); ok {
-		g.begin(client, version, ledger.KindTool, cleanName(tl), "", "", nil).endClass(classNotFound, ledger.Bool(false))
-		return
+func (g *Gateway) recordUnknown(ctx context.Context, client, version, name string) (hiddenClass string) {
+	if d, ok := g.registeredTool(ctx, name); ok {
+		// Registered, enabled and allowed by policy but not visible to this client under
+		// its profile: the name exists, so it is not a miss (found=1, hidden_by_profile).
+		// Disabled and confirm=deny tools keep the earlier not_found/found=0 record.
+		class, found := classNotFound, ledger.Bool(false)
+		if d.Enabled && d.Policy.Confirm != tool.ConfirmDeny && !g.exposure(ctx).ToolVisible(d, client) {
+			class, found = classHidden, ledger.Bool(true)
+		}
+		g.begin(client, version, ledger.KindTool, cleanName(d.Name), "", "", nil).endClass(class, found)
+		if *found {
+			return class
+		}
+		return ""
 	}
-	if srv, tl, ok := g.registeredServerTool(ctx, name); ok {
-		g.begin(client, version, ledger.KindMCP, tl, srv, "", nil).endClass(classNotFound, ledger.Bool(false))
-		return
+	if s, tl, ok := g.registeredServerTool(ctx, name); ok {
+		class, found := classNotFound, ledger.Bool(false)
+		if s.Enabled && g.exposure(ctx).ServerMode(s, client) != mcp.ExposureGateway {
+			// The (enabled) server is registered but not proxied for this client. Only a tool
+			// the server is known to have counts as found (a typo on a hidden server stays a miss).
+			if g.serverHasTool(ctx, s.Name, string(tl)) {
+				class, found = classHidden, ledger.Bool(true)
+			}
+		}
+		g.begin(client, version, ledger.KindMCP, tl, s.Name, "", nil).endClass(class, found)
+		if *found {
+			return class
+		}
+		return ""
 	}
 	switch {
 	case strings.HasPrefix(name, CustomPrefix) && len(name) > len(CustomPrefix):
 	case strings.Contains(name, ProxySep) && !strings.HasPrefix(name, ProxySep) && !strings.HasSuffix(name, ProxySep):
 	default:
-		return
+		return ""
 	}
 	clean := cleanName(name)
 	// The lock is held across the write so the count only ever includes rows that
@@ -224,11 +250,11 @@ func (g *Gateway) recordUnknown(ctx context.Context, client, version, name strin
 	defer g.unkMu.Unlock()
 	if _, dup := g.unknown[clean]; dup {
 		g.log.Debug("unknown tool name not recorded (duplicate)", "name", clean)
-		return
+		return ""
 	}
 	if len(g.unknown) >= maxUnknownRows {
 		g.log.Debug("unknown tool name not recorded (session limit)", "name", clean)
-		return
+		return ""
 	}
 	c := g.begin(client, version, ledger.KindTool, clean, "", "", nil)
 	if c.endClass(classNotFound, ledger.Bool(false)) {
@@ -237,37 +263,56 @@ func (g *Gateway) recordUnknown(ctx context.Context, client, version, name strin
 		}
 		g.unknown[clean] = struct{}{}
 	}
+	return ""
+}
+
+// hiddenReason is the wording for a registered-but-not-exposed call.
+func hiddenReason(string) string { return "프로필/노출 설정에서 숨김" }
+
+// serverHasTool reports whether the registry knows a (non-stale) tool of the server
+// whose exposed (sanitized) name is name.
+func (g *Gateway) serverHasTool(ctx context.Context, server, name string) bool {
+	full, err := g.o.Servers.Get(ctx, server)
+	if err != nil {
+		return false
+	}
+	for _, t := range full.Tools {
+		if !t.Stale && (t.Name == name || sanitizeTool(t.Name) == name) {
+			return true
+		}
+	}
+	return false
 }
 
 // registeredTool matches forge_<name> against registered custom tools (enabled or not).
-func (g *Gateway) registeredTool(ctx context.Context, name string) (string, bool) {
+func (g *Gateway) registeredTool(ctx context.Context, name string) (*tool.Definition, bool) {
 	if !strings.HasPrefix(name, CustomPrefix) || len(name) == len(CustomPrefix) {
-		return "", false
+		return nil, false
 	}
 	defs, err := g.o.Tools.List(ctx)
 	if err != nil {
-		return "", false
+		return nil, false
 	}
-	for _, d := range defs {
-		if name == CustomPrefix+d.Name || name == customBase(d.Name) {
-			return d.Name, true
+	for i := range defs {
+		if name == CustomPrefix+defs[i].Name || name == customBase(defs[i].Name) {
+			return &defs[i], true
 		}
 	}
-	return "", false
+	return nil, false
 }
 
 // registeredServerTool matches <server>__<tool> against the normalized names of
 // registered servers (longest prefix wins) and returns the registered name.
-func (g *Gateway) registeredServerTool(ctx context.Context, name string) (server string, tl safeName, ok bool) {
+func (g *Gateway) registeredServerTool(ctx context.Context, name string) (server *mcp.Info, tl safeName, ok bool) {
 	servers, err := g.o.Servers.List(ctx)
 	if err != nil {
-		return "", "", false
+		return nil, "", false
 	}
 	best := -1
-	for _, s := range servers {
-		p := NormalizeServer(s.Name) + ProxySep
+	for i := range servers {
+		p := NormalizeServer(servers[i].Name) + ProxySep
 		if strings.HasPrefix(name, p) && len(name) > len(p) && len(p) > best {
-			best, server, tl = len(p), s.Name, cleanName(name[len(p):])
+			best, server, tl = len(p), &servers[i], cleanName(name[len(p):])
 		}
 	}
 	return server, tl, best >= 0

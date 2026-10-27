@@ -201,11 +201,11 @@ func TestHistoryValidationErrors(t *testing.T) {
 		"history unused --client x":              "지원하지 않습니다",
 		"history unused --limit 3":               "지원하지 않습니다",
 		"history misses --name x":                "지원하지 않습니다",
-		"history top --raw":                      "unknown flag",
+		"history top --raw":                      "알 수 없는 플래그",
 		"history --group-by kind --raw":          "지원하지 않습니다",
-		"skill misses --kind tool":               "unknown flag",
+		"skill misses --kind tool":               "알 수 없는 플래그",
 		"skill misses --since zzz":               "--since",
-		"history extra":                          "unknown command",
+		"history extra":                          "위치 인자",
 		"history --output x --json --format csv": "--json",
 	}
 	for cmd, want := range cases {

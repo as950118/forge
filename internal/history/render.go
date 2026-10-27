@@ -108,13 +108,36 @@ func SafeJSON(v any) ([]byte, error) {
 // CSVCell neutralizes one cell: terminal-active characters other than tab, CR
 // and LF become visible escapes, and a cell that starts with = + - @ TAB or CR
 // gets a leading apostrophe so spreadsheets do not evaluate it as a formula
-// (OWASP CSV injection guidance). Quoting is left to encoding/csv.
+// (OWASP CSV injection guidance). Quoting is left to encoding/csv. Two values that
+// cannot be a formula keep their exact text: a lone "-" (the table's "empty" mark)
+// and a plain negative number ("-1", "-0.5"). Quoting is left to encoding/csv.
 func CSVCell(s string) string {
 	s = textsafe.EscapeExcept(s, "\t\r\n")
-	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
+	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) && !plainNegative(s) {
 		s = "'" + s
 	}
 	return s
+}
+
+// plainNegative reports "-" or "-<digits>[.<digits>]" and nothing else.
+func plainNegative(s string) bool {
+	if s == "-" {
+		return true
+	}
+	if len(s) < 2 || s[0] != '-' {
+		return false
+	}
+	dot := false
+	for i := 1; i < len(s); i++ {
+		switch c := s[i]; {
+		case c >= '0' && c <= '9':
+		case c == '.' && !dot && i > 1 && i < len(s)-1:
+			dot = true
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func writeCSV(w io.Writer, head []string, rows [][]string) error {
@@ -224,6 +247,12 @@ func ListReport(calls []Call, limit int, raw bool, loc *time.Location) Report {
 	} else {
 		r.Notes = []string{"시각은 로컬 시간대입니다."}
 	}
+	for _, c := range calls {
+		if c.ErrorClass == "hidden_by_profile" {
+			r.Notes = append(r.Notes, "hidden_by_profile: 등록된 도구이지만 이 클라이언트의 프로필/노출 설정에서 숨겨져 호출이 거부됨 (미등록이 아님).")
+			break
+		}
+	}
 	return r
 }
 
@@ -329,6 +358,7 @@ func MissesReport(ms []Miss, loc *time.Location) Report {
 	}
 	r.JSON = map[string]any{"count": len(masked), "misses": masked}
 	r.Notes = []string{
+		"hidden_by_profile 호출(등록돼 있지만 프로필/노출 설정에서 숨겨진 도구)은 미등록이 아니므로 여기에 나오지 않습니다. forge history --failed 로 확인하세요.",
 		"미등록 호출 이름: Forge 레지스트리에 없는 이름으로 호출된 기록(found=0)입니다. 도구 이름은 기록 시 정화·120바이트로 잘린 값이며 실제 도구명이 아닐 수 있습니다.",
 		"레지스트리에 없는 MCP 서버의 hook 호출은 사용자가 직접 붙인 서버일 수 있어 miss 로 세지 않습니다(found 미상, TASK-0019). 게이트웨이가 found=0 으로 명시한 호출만 MCP miss 로 나옵니다.",
 	}

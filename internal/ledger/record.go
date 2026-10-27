@@ -147,6 +147,15 @@ WHERE s.name = ? ORDER BY (s.scope='global') DESC, s.id LIMIT 1`, ev.Name).Scan(
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return 0, err
 		}
+		if !registered && ev.Source == SourceHook {
+			// A hook sees the gateway's exposed name (forge_<tool>, <server>__<tool>, the
+			// meta tools), not the registry name; resolve it so a registered tool is not a miss.
+			reg, tid, err := hookGatewayRegistered(ctx, tx, ev.Name)
+			if err != nil {
+				return 0, err
+			}
+			registered, toolID = reg, tid
+		}
 	case KindMCP:
 		// Claude Code normalizes '-' in server names to '_' inside mcp__<server>__<tool>.
 		err := tx.QueryRowContext(ctx, `
@@ -210,6 +219,12 @@ ON CONFLICT(client, session_id) DO UPDATE SET
   project = COALESCE(sessions.project, excluded.project),
   client_version = COALESCE(excluded.client_version, sessions.client_version)`,
 			ev.Client, ev.SessionID, nstr(ev.Project), nstr(ev.ClientVersion), ts.UnixMilli()); err != nil {
+			return 0, err
+		}
+	}
+
+	if clientKnown > 0 {
+		if err := linkCall(ctx, tx, id, ev, ts.UnixMilli()); err != nil {
 			return 0, err
 		}
 	}
