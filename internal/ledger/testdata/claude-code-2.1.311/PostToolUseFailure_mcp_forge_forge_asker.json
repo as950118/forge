@@ -1,0 +1,23 @@
+{
+  "cwd": "/tmp/fixture/project",
+  "duration_ms": 5,
+  "effort": {
+    "level": "low"
+  },
+  "error": "<string>",
+  "hook_event_name": "PostToolUseFailure",
+  "is_interrupt": false,
+  "mcp_server": {
+    "name": "forge",
+    "source": "dynamic"
+  },
+  "permission_mode": "default",
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "tool_input": {
+    "name": "<string>"
+  },
+  "tool_name": "mcp__forge__forge_asker",
+  "tool_use_id": "toolu_FIXTURE",
+  "transcript_path": "/tmp/fixture/transcript.jsonl"
+}

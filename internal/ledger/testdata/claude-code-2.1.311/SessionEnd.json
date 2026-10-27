@@ -1,0 +1,8 @@
+{
+  "cwd": "/tmp/fixture/project",
+  "hook_event_name": "SessionEnd",
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "reason": "other",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "transcript_path": "/tmp/fixture/transcript.jsonl"
+}

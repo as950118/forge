@@ -1,0 +1,21 @@
+{
+  "cwd": "/tmp/fixture/project",
+  "duration_ms": 5,
+  "effort": {
+    "level": "low"
+  },
+  "hook_event_name": "PostToolUse",
+  "permission_mode": "default",
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "tool_input": {
+    "skill": "forge-probe-skill"
+  },
+  "tool_name": "Skill",
+  "tool_response": {
+    "commandName": "forge-probe-skill",
+    "success": true
+  },
+  "tool_use_id": "toolu_FIXTURE",
+  "transcript_path": "/tmp/fixture/transcript.jsonl"
+}

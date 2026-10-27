@@ -1,0 +1,15 @@
+{
+  "background_tasks": [],
+  "cwd": "/tmp/fixture/project",
+  "effort": {
+    "level": "low"
+  },
+  "hook_event_name": "Stop",
+  "last_assistant_message": "<string>",
+  "permission_mode": "default",
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "session_crons": [],
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "stop_hook_active": false,
+  "transcript_path": "/tmp/fixture/transcript.jsonl"
+}

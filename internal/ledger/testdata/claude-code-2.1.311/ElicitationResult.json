@@ -1,0 +1,10 @@
+{
+  "action": "cancel",
+  "cwd": "/tmp/fixture/project",
+  "hook_event_name": "ElicitationResult",
+  "mcp_server_name": "<string>",
+  "mode": "form",
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "transcript_path": "/tmp/fixture/transcript.jsonl"
+}

@@ -3,7 +3,7 @@
 - 확인 버전: **Claude Code 2.1.305** (`claude --version`, `/Users/heonjinjeong/.local/bin/claude`)
 - 버전 게이트: 이 "확인 버전"이 `internal/clientver` 의 지원 버전 표(`clientver.Specs`)이며 테스트가 이 줄과 대조한다. `forge sync --apply`·`forge doctor` 는 `claude --version` 만 실행해 비교한다(`docs/doctor.md`).
 - 확인일: 2026-10-21
-- 근거 표기: `[doc]` 공식 문서(code.claude.com/docs/en/{skills,mcp,hooks}), `[help]` `claude ... --help` 출력, `[local]` 로컬 파일 관찰(홈은 읽기만, 비밀값 미기록), `[미확인]` 확인 못함.
+- 근거 표기: `[doc]` 공식 문서(code.claude.com/docs/en/{skills,mcp,hooks}), `[help]` `claude ... --help` 출력, `[local]` 로컬 파일 관찰(홈은 읽기만, 비밀값 미기록), `[실측 2.1.311]` 실제 `claude -p` 실행 관찰(TASK-0029, 2026-10-27, §6), `[미확인]` 확인 못함.
 - 공식 문서는 최신판을 가져온 것이라 2.1.305와 정확히 같다는 보장이 없다. `[doc]` 항목은 doctor/픽스처 테스트로 재검증이 필요하다(R1).
 
 ## 1. 스킬
@@ -35,8 +35,8 @@
 | 주의 | `url`만 있고 `type`이 없으면 stdio로 취급되어 설정 오류로 스킵 -> 어댑터는 `type`을 항상 명시 | [doc] |
 | env/헤더 | `${VAR}`, `${VAR:-default}` 확장. 적용 대상: `command, args, env, url, headers`. 미설정+기본값 없음이면 경고 후 리터럴 유지. 원격 url/headers에서 `ANTHROPIC_API_KEY` 등은 빈 값으로 읽힘 | [doc] |
 | CLI | `claude mcp add [-t stdio\|sse\|http] [-s local\|user\|project] [-e K=V] [-H "K: V"] <name> <cmdOrUrl> [args...]`, `add-json <name> <json>`, `get`, `list`, `remove`, `login/logout`, `reset-project-choices`, `add-from-claude-desktop` | [help] |
-| 승인 | `.mcp.json` 서버는 최초 사용자 승인 필요(`⏸ Pending approval`). `-p`/SDK에서는 승인 없이 로드. 차단: `disabledMcpjsonServers`, `--strict-mcp-config` | [help], [doc] |
-| 1회성 주입 | `--mcp-config <json파일|문자열>`, `--strict-mcp-config` | [help] |
+| 승인 | `.mcp.json` 서버는 최초 사용자 승인 필요(`⏸ Pending approval`). `-p`/SDK에서는 승인 없이 로드. 차단: `disabledMcpjsonServers`, `--strict-mcp-config` | [help], [doc]. `-p` 에서 `.mcp.json` 자동 발견(`--mcp-config` 없이)은 사용자 MCP 가 섞여 실행하지 않음 [미확인]; `forge sync` 가 쓴 `.mcp.json` 을 `--mcp-config <그 파일> --strict-mcp-config` 로 넘기면 connected [실측 2.1.311] |
+| 1회성 주입 | `--mcp-config <json파일|문자열>`, `--strict-mcp-config` | [help], [실측 2.1.311] 임시 파일로 게이트웨이 connected, tools/list·tools/call 성공(§6) |
 | 재적용 | MCP 설정 변경은 `/reload-plugins` 필요 | [doc] |
 
 ## 3. Hook 이벤트
@@ -51,7 +51,7 @@
 - matcher: `*`/빈 값/생략=전체. 영숫자·`_`·`-`·공백·`,`·`|`만이면 정확 일치 목록, 그 외는 JS 정규식. [doc]
 - command hook 은 stdin 으로 JSON 수신. [doc]; 로컬 hook 예시(`cat | jq -r '.message'`)도 stdin JSON 사용. [local]
 
-이벤트 (문서 기준 33종) [doc]: SessionStart, Setup, UserPromptSubmit, UserPromptExpansion, PreToolUse, PermissionRequest, PermissionDenied, PostToolUse, PostToolUseFailure, PostToolBatch, Notification, MessageDisplay, SubagentStart, SubagentStop, TaskCreated, TaskCompleted, Stop, StopFailure, TeammateIdle, InstructionsLoaded, ConfigChange, CwdChanged, DirectoryAdded, FileChanged, WorktreeCreate, WorktreeRemove, PreCompact, PostCompact, PreModelSwitch, PostModelSwitch, Elicitation, ElicitationResult, SessionEnd. (2.1.305에서의 실제 발화 여부는 [미확인])
+이벤트 (문서 기준 33종, 2.1.311 에서 실제 발화를 확인한 것은 §6 표) [doc]: SessionStart, Setup, UserPromptSubmit, UserPromptExpansion, PreToolUse, PermissionRequest, PermissionDenied, PostToolUse, PostToolUseFailure, PostToolBatch, Notification, MessageDisplay, SubagentStart, SubagentStop, TaskCreated, TaskCompleted, Stop, StopFailure, TeammateIdle, InstructionsLoaded, ConfigChange, CwdChanged, DirectoryAdded, FileChanged, WorktreeCreate, WorktreeRemove, PreCompact, PostCompact, PreModelSwitch, PostModelSwitch, Elicitation, ElicitationResult, SessionEnd. (실제 발화 확인: SessionStart, UserPromptSubmit, UserPromptExpansion(스킬 `/이름`), PreToolUse, PostToolUse, PostToolUseFailure, PostToolBatch, MessageDisplay, Stop, SessionEnd, Elicitation, ElicitationResult, Notification [실측 2.1.311]; 나머지는 [미확인])
 
 공통 입력 필드 [doc]: `session_id, prompt_id, transcript_path, cwd, scratchpad_dir, permission_mode, effort{level}, hook_event_name`, 서브에이전트 내부에서는 `agent_id, agent_type`.
 
@@ -62,9 +62,12 @@
 | PostToolUseFailure | `tool_name, tool_input, tool_use_id, error, is_interrupt, duration_ms` (사전 거부/권한 거부 시 미발화) | [doc] |
 | Stop | `stop_hook_active, last_assistant_message, background_tasks, session_crons` | [doc] |
 | SubagentStop | 위 + `agent_id, agent_type, agent_transcript_path` | [doc] |
-| UserPromptExpansion | matcher=명령/스킬 이름(`command_name`) | [doc] |
-| SessionStart/SessionEnd, Notification(`message`) 등 | SessionStart/End 필드는 [미확인]. Notification 은 `.message` 사용이 [local] 로 관찰 | [local] |
+| UserPromptExpansion | `expansion_type, command_name, command_args, command_source, prompt` + 공통(`session_id, prompt_id, transcript_path, cwd, permission_mode, hook_event_name`). 스킬 `/forge-probe-skill` 에서 `expansion_type="slash_command"`, `command_name="forge-probe-skill"`, `command_source="projectSettings"`, `command_args=""`. `tool_use_id` 없음. 내장 로컬 명령 `/context` 는 발화하지 않음 | [실측 2.1.311] |
+| SessionStart / SessionEnd | `session_id, transcript_path, cwd, hook_event_name` + SessionStart `source`("startup"), SessionEnd `prompt_id, reason`("other") | [실측 2.1.311] |
+| Notification | `message, notification_type`(예: `elicitation_response`) + 공통 | [실측 2.1.311], [local] |
+| Elicitation / ElicitationResult | `mcp_server_name, mode`("form"), `message, requested_schema` / `action`("cancel" 등) + 공통 | [실측 2.1.311] |
 
+- 실측 PreToolUse/PostToolUse 필드(2.1.311): Pre `tool_name, tool_input, tool_use_id, effort, prompt_id, permission_mode` + MCP 도구는 `mcp_server{name,source}`(name 은 클라이언트 쪽 서버 이름, `source`="dynamic"), Post 는 추가로 `tool_response, duration_ms`. `Skill` 도구의 `tool_input` 은 `{"skill": <이름>}`, `tool_response` 는 `{"success":true,"commandName":<이름>}`. MCP `tool_response` 는 `[{type:"text",text}]` 배열. PostToolUseFailure 는 `error, is_interrupt, duration_ms` 추가(게이트웨이 확인 거부도 이 이벤트로 옴). [실측 2.1.311]
 - 모델/토큰: 확인한 Stop/Pre/PostToolUse 페이로드에는 모델·토큰 필드 없음(Agent 도구의 PostToolUse `tool_response` 에만 `resolvedModel, modelsUsed, totalTokens, usage`). [doc]. `PreModelSwitch/PostModelSwitch` 페이로드는 [미확인].
 - 헤드리스: `--output-format stream-json --include-hook-events` 로 hook 생명주기 이벤트를 스트림에 포함 가능. [help]
 - Forge가 쓸 hook 설정은 `settings.json`에 병합하되 Forge 마커로 구분 필요(사용자 hook 보존).
@@ -88,11 +91,11 @@
 ## 5. 스킬 호출 식별 (R3)
 
 관찰 근거 [local] (실제 transcript):
-- 모델 호출: `assistant` 의 `tool_use` `{"name":"Skill","input":{"skill":"code-review","args":"medium"}}`. 결과 `tool_result` 텍스트 `Launching skill: <name>`, 최상위 `toolUseResult` 는 `{"success":true,"commandName":"<name>"}` 또는 fork 실행 시 `{"success":true,"commandName","status":"forked","background":true,"agentId",...}`.
-- 사용자 `/명령` 입력: `user` 레코드 content 에 `<command-name>/xxx</command-name><command-message>..</command-message><command-args>..</command-args>` 태그 (관찰 사례는 `/model`; 스킬 슬래시 호출이 같은 형태인지는 [미확인]).
-- hook 경로 [doc]: `PreToolUse`/`PostToolUse` 를 `Skill` 도구에 매칭하면 모델 호출만 잡힌다(`tool_input.skill` 필드명은 transcript 로 확인했으나 hook 문서에는 명시 없음 -> hook 에서의 실제 payload [미확인]). `/skillname` 직접 입력은 PreToolUse 를 우회하므로 `UserPromptExpansion`(matcher=스킬/명령 이름)으로 잡아야 한다.
+- 모델 호출 [실측 2.1.311: hook 에서도 동일 — PreToolUse/PostToolUse `tool_name="Skill"`, `tool_input.skill`]: `assistant` 의 `tool_use` `{"name":"Skill","input":{"skill":"code-review","args":"medium"}}`. 결과 `tool_result` 텍스트 `Launching skill: <name>`, 최상위 `toolUseResult` 는 `{"success":true,"commandName":"<name>"}` 또는 fork 실행 시 `{"success":true,"commandName","status":"forked","background":true,"agentId",...}`.
+- 사용자 `/명령` 입력: `user` 레코드 content 에 `<command-name>/xxx</command-name><command-message>..</command-message><command-args>..</command-args>` 태그 (관찰 사례는 `/model`; 스킬 슬래시 호출의 transcript 형태는 [미확인] — hook 은 UserPromptExpansion 으로 잡는다).
+- hook 경로 [doc]: `PreToolUse`/`PostToolUse` 를 `Skill` 도구에 매칭하면 모델 호출만 잡힌다(`tool_input.skill` 은 hook payload 로 실측 확인됨 [실측 2.1.311]). `/skillname` 직접 입력은 PreToolUse 를 우회하므로 `UserPromptExpansion`(matcher=스킬/명령 이름)으로 잡아야 한다.
 
-- UserPromptExpansion payload (TASK-0019 AC-1, 부분 완료): 문서에서 확인되는 것은 matcher 가 명령/스킬 이름이라는 점뿐이다. payload 의 필드명(`command_name` 이 payload 키인지, 스킬 vs 일반 명령 구분 필드, 인자 필드)과 `tool_use_id` 유무는 실제 payload 를 캡처하지 못해 **[미확인]** 이다(실제 claude 실행 불가). 따라서 `invocation=user` 기록은 구현하지 않았고(`internal/ledger/hook.go` 의 `TODO(UserPromptExpansion)` 유지), 픽스처를 캡처한 뒤 구현한다. 그때까지 사용자 `/스킬명` 호출은 이력에 잡히지 않는 것이 알려진 한계다.
+- UserPromptExpansion payload (TASK-0029 실측, 2.1.311): 사용자가 `/forge-probe-skill` 을 입력하면 PreToolUse 는 오지 않고 UserPromptExpansion 만 온다. 필드명은 §3 표. 스킬과 일반 명령의 구분은 `command_source`(스킬은 `projectSettings`; 개인 스킬·플러그인·번들 스킬 값은 [미확인])와 `expansion_type`(`slash_command` 외 값은 [미확인])으로 하되, Forge 가 등록·동기화한 스킬 이름과 `command_name` 을 대조하는 것이 가장 확실하다. 내장 로컬 명령(`/context`)은 이 이벤트를 발화하지 않았다. 따라서 TASK-0028(`invocation=user` 기록)은 구현 가능하다. 픽스처: `internal/ledger/testdata/claude-code-2.1.311/UserPromptExpansion.json`(필드명과 열거 값만).
 
 결론(R3): **식별 가능.** (a) transcript 의 `tool_use name="Skill"`(+`input.skill`) 파싱, (b) hook `PreToolUse|PostToolUse` matcher `Skill` + `UserPromptExpansion`. 모델이 SKILL.md 를 Read 로 직접 읽는 우회 경로는 별도이며 이 경로는 식별 불가/불확실. "스킬 사용"의 1차 신호는 `Skill` 도구 호출로 정의 가능.
 
@@ -104,3 +107,24 @@
 4. hook 설치: `settings.json` 에 Forge 마커 command 를 병합하고 제거 시 마커로만 삭제. 기존 사용자 hook(예: 전역 Notification) 보존. hook 은 `command` 타입으로 `forge hook ingest` 같은 stdin JSON 소비자를 호출하는 형태가 적합.
 5. 게이트웨이 `skill` 메타 도구 경로: MCP 도구 호출은 PostToolUse 에 `mcp_server` 와 함께 잡히므로 hook 과 게이트웨이 원장을 `session_id`+`tool_use_id` 로 교차 검증 가능.
 6. R1 대응: 이벤트 33종·필드는 문서 기준이므로 버전별 픽스처(실제 stdin 샘플)를 M4 전에 캡처해 테스트로 고정한다. SessionStart/End 페이로드, Skill 의 hook payload, transcript usage 중복 여부가 후속 확인 대상.
+
+## 6. 실측 (TASK-0029, Claude Code 2.1.311, 구독 `claude -p`, 모델 haiku)
+
+이 절은 위 "확인 버전 2.1.305"(clientver 테스트와 연동)와 별개로 **2.1.311** 에서 한 실측이다.
+
+격리: 임시 FORGE_HOME·임시 프로젝트, `--setting-sources project --strict-mcp-config --mcp-config <임시 파일>`, 실제 HOME 은 `claude` 로그인에만 사용. 가짜 비밀만 사용. 각 항목은 `claude -p` 1회 실행에서 관찰한 것이며 반복 재현성(모델이 도구를 고르는 방식 등)은 보장하지 않는다.
+
+| 항목 | 결과 | 판정 |
+|------|------|------|
+| 게이트웨이 접속 | `--mcp-config` 임시 파일의 `forge`(stdio `forge mcp serve`) 가 `connected`, 도구가 `mcp__forge__<노출 이름>` 으로 노출, 커스텀 도구(`forge_greet`)와 프록시 도구(`demo_mcp__echo`, `demo_mcp__add`) 호출 성공, 원장에 `source=gateway, client=claude-code, client_version=2.1.311` 기록 | 확인됨 |
+| initialize 의 clientInfo | `name="claude-code"`, `title="Claude Code"`, `version="2.1.311"`; `protocolVersion="2025-11-25"`, capabilities `roots{listChanged}`, `elicitation{form,url}`, `extensions{io.modelcontextprotocol/tasks}`. `internal/gateway/client.go` 의 `claude-code` 매핑이 맞다 | 확인됨 |
+| 추가 관찰 | initialize 전에 알 수 없는 메서드 `server/discover`(id `server-discover-probe-1`)를 먼저 보낸다(게이트웨이의 응답 내용은 확인하지 않았고 연결에는 영향 없었다). `tools/call` 의 `params._meta` 에 `claudecode/toolUseId`(hook 의 `tool_use_id` 와 같은 값)와 `progressToken` 이 들어 있다 | 확인됨 |
+| elicitation (confirm=ask) | Claude Code 는 `elicitation` form 을 광고하고 `-p`(비대화형)에서도 `elicitation/create` 를 받는다. 다만 사용자 UI 가 없어 기본적으로 `action=cancel` 로 자동 응답하므로 게이트웨이는 실행을 거부한다(`사용자가 실행을 거부했습니다`, 원장 `error_class=confirm_refused`). `Elicitation` hook 이 `{"hookSpecificOutput":{"hookEventName":"Elicitation","action":"accept","content":{"approve":true}}}` 를 돌려주면 승인되어 도구가 실행됐다. 대화형 세션에서 사람이 승인하는 경로는 이 실행에서 시험하지 않았다 | 부분(대화형 승인 [미확인]) |
+| 64자 도구 이름 | 게이트웨이의 52자 노출 이름(전체 `mcp__forge__` + 52 = 64자)은 그대로 노출·호출됐다. 직접 만든 mock 서버의 전체 이름 64/65/88자 도구는 모두 목록에 나타났고 56자·88자 도구 호출은 성공했다(65자 호출은 모델이 이름을 잘못 옮겨 적어 판정 불가). 즉 이 버전·모델에서 클라이언트나 API 의 64자 거부는 재현되지 않았다. Forge 의 64자 예산은 보수적 가정이며 하드 한도 여부는 [미확인](다른 모델·API 경로 [미확인]) | 부분 |
+| 스킬 로드 | `forge sync --target claude-code --scope project` 가 쓴 `.claude/skills/<이름>/SKILL.md` 가 init 의 `skills`·slash_commands 에 나타나고, `/forge-probe-skill` 직접 호출과 모델의 `Skill` 도구 호출 모두 본문이 적용됨 | 확인됨 |
+| sync 가 쓴 hook | `.claude/settings.json` 의 PreToolUse/PostToolUse/PostToolUseFailure(matcher `Skill\|mcp__.*`) 가 `--setting-sources project` 에서 실제로 호출되어 원장에 `source=hook` 행(스킬 `invocation=model`, MCP `ok`, 실패 `error_class=failure`)이 기록됨. 같은 호출의 hook 행과 게이트웨이 행은 `tool_use_id` 로 연결되어 `forge history summary` 가 1건으로 셈 | 확인됨 |
+| `.mcp.json` 자동 발견 | 위 표 §2 참고 | [미확인] |
+
+증거의 질: 모든 항목은 `claude -p` 단일 실행 관찰이다. 원본 캡처 로그는 보존하지 않았다(작업자의 와일드카드 삭제와 임시 디렉터리 정리로 소실). 검증자가 독립 재현해 일치를 확인한 것은 AC-1(게이트웨이 접속·clientInfo), AC-3(스킬·hook·원장), AC-4(UserPromptExpansion 필드 집합)이다. **elicitation 동작(cancel 자동 응답, Elicitation hook 승인)과 `_meta["claudecode/toolUseId"]` 주장은 단일 실행 관찰이며 검증자가 재현하지 못했다**(`tool_use_id` 로 hook 행과 게이트웨이 행이 병합된 것은 `_meta` 값이 전달됐다는 간접 근거일 뿐이다). 픽스처 출처는 `internal/ledger/testdata/claude-code-2.1.311/README.md`: `UserPromptExpansion.json` 은 화면 출력으로 손복원했고(필드 집합은 검증자 재현으로 일치 확인), 나머지는 원본 캡처를 정화한 사본이다.
+
+발화 확인한 hook 이벤트와 필드는 §3 표, 픽스처는 `internal/ledger/testdata/claude-code-2.1.311/`(필드명·열거 값만, 자유 텍스트는 자리표시자).
