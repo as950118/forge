@@ -30,6 +30,11 @@ import (
 //   - the names correspond (hookIdentities) after the gateway's sanitizing;
 //   - the timestamps differ by at most LinkWindow; the nearest candidate wins.
 //
+// Direct merge (TASK-0030, ADR-F0004): when the gateway row itself carries a
+// tool_use_id (Claude Code sends it in tools/call params._meta), the two rows are
+// joined by that id (same client, names correspond, 1:1) instead of the time window.
+// A gateway row with an id is never window-linked; a gateway row without one still is.
+//
 // Not linked on purpose: meta tools (forge_skill/forge_list: the gateway records the
 // served skill, not the meta tool), names the gateway shortened or suffixed with a
 // hash, and direct (non-gateway) MCP servers.
@@ -109,6 +114,24 @@ func linkCall(ctx context.Context, tx linkTx, id int64, ev Event, ts int64) erro
 			ev.Client, ev.SessionID, ev.ToolUseID).Scan(&linked); err != nil || linked > 0 {
 			return err
 		}
+		// Direct merge: a gateway row that carries this very tool_use_id (the client sent
+		// it in params._meta). It still has to be unlinked (gw- session) and the names
+		// must correspond; no time window applies.
+		if partner, err := directPartner(ctx, tx, `
+SELECT id, kind, name, COALESCE(mcp_server,'') FROM ledger
+WHERE source='gateway' AND tool_use_id=? AND client=? AND substr(session_id,1,3)=? AND kind IN ('tool','mcp')
+ORDER BY abs(ts - ?), id`, func(kind, server, name string) bool {
+			for _, h := range ids {
+				if h.matches(kind, server, name) {
+					return true
+				}
+			}
+			return false
+		}, ev.ToolUseID, ev.Client, GatewaySessionPrefix, ts); err != nil {
+			return err
+		} else if partner != 0 {
+			return joinRows(ctx, tx, id, partner)
+		}
 		rows, err := tx.QueryContext(ctx, `
 SELECT id, kind, name, COALESCE(mcp_server,'') FROM ledger
 WHERE source='gateway' AND tool_use_id IS NULL AND client=? AND substr(session_id,1,3)=? AND kind IN ('tool','mcp')
@@ -139,6 +162,43 @@ WHERE source='gateway' AND tool_use_id IS NULL AND client=? AND substr(session_i
 			return nil
 		}
 		return joinRows(ctx, tx, id, partner)
+
+	case ev.Source == SourceGateway && ev.ToolUseID != "" && (ev.Kind == KindTool || ev.Kind == KindMCP) &&
+		strings.HasPrefix(ev.SessionID, GatewaySessionPrefix):
+		// The gateway knows the client's tool_use_id (TASK-0030): merge with the hook row
+		// of the same id, never by time window (a different id means a different call).
+		var hid int64
+		var name string
+		rows, err := tx.QueryContext(ctx, `
+SELECT h.id, h.name FROM ledger h
+WHERE h.source='hook' AND h.kind='tool' AND h.tool_use_id=? AND h.client=? AND h.session_id IS NOT NULL
+  AND substr(h.session_id,1,3) != ?
+  AND NOT EXISTS (SELECT 1 FROM ledger g WHERE g.source='gateway' AND g.client=h.client AND g.session_id=h.session_id AND g.tool_use_id=h.tool_use_id)
+ORDER BY abs(h.ts - ?), h.id`, ev.ToolUseID, ev.Client, GatewaySessionPrefix, ts)
+		if err != nil {
+			return err
+		}
+		partner := int64(0)
+		for rows.Next() {
+			if err := rows.Scan(&hid, &name); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			for _, h := range hookIdentities(name) {
+				if partner == 0 && h.matches(ev.Kind, ev.MCPServer, ev.Name) {
+					partner = hid
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		_ = rows.Close()
+		if partner == 0 {
+			return nil
+		}
+		return joinRows(ctx, tx, partner, id)
 
 	case ev.Source == SourceGateway && ev.ToolUseID == "" && (ev.Kind == KindTool || ev.Kind == KindMCP) &&
 		strings.HasPrefix(ev.SessionID, GatewaySessionPrefix):
@@ -176,6 +236,27 @@ ORDER BY abs(h.ts - ?), h.id`, ev.Client, GatewaySessionPrefix, ts-win, ts+win, 
 		return joinRows(ctx, tx, partner, id)
 	}
 	return nil
+}
+
+// directPartner runs q (columns id, kind, name, mcp_server) and returns the first row
+// accepted by ok, or 0.
+func directPartner(ctx context.Context, tx linkTx, q string, ok func(kind, server, name string) bool, args ...any) (int64, error) {
+	rows, err := tx.QueryContext(ctx, q, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		var kind, name, server string
+		if err := rows.Scan(&id, &kind, &name, &server); err != nil {
+			return 0, err
+		}
+		if ok(kind, server, name) {
+			return id, nil
+		}
+	}
+	return 0, rows.Err()
 }
 
 // joinRows makes the hook row and the gateway row one call: the gateway row takes the

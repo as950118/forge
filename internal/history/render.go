@@ -226,7 +226,11 @@ func ListReport(calls []Call, limit int, raw bool, loc *time.Location) Report {
 			res += "(" + c.ErrorClass + ")"
 		}
 		src := strings.Join(c.Sources, ",")
-		row := []string{localTime(c.TS, loc), c.Kind, displayName(c.MCPServer, c.Name), dash(c.Client), src, dash(res), dash(i64(c.LatencyMS)), dash(c.Project), dash(c.SessionID)}
+		kind := c.Kind
+		if c.Invocation != "" { // skill only: who invoked it (user /name vs model Skill tool)
+			kind += "(" + c.Invocation + ")"
+		}
+		row := []string{localTime(c.TS, loc), kind, displayName(c.MCPServer, c.Name), dash(c.Client), src, dash(res), dash(i64(c.LatencyMS)), dash(c.Project), dash(c.SessionID)}
 		crow := []string{c.Time, strconv.FormatInt(c.TS, 10), strconv.FormatInt(c.ID, 10), c.Kind, c.MCPServer, c.Name, c.Client, src,
 			boolWord(c.OK, "1", "0"), c.ErrorClass, i64(c.LatencyMS), boolWord(c.Found, "1", "0"), c.Invocation, c.Project, c.SessionID}
 		if raw {
