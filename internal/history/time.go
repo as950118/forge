@@ -36,10 +36,7 @@ func ParseTime(flag, v string, loc *time.Location) (int64, error) {
 	if loc == nil {
 		loc = time.Local
 	}
-	if last := v[len(v)-1]; last >= 'a' && last <= 'z' || last >= 'A' && last <= 'Z' {
-		if last == 'Z' { // RFC3339 UTC suffix, handled below
-			goto absolute
-		}
+	if last := v[len(v)-1]; (last >= 'a' && last <= 'z' || last >= 'A' && last <= 'Z') && relativeShape(v) {
 		num, unit := v[:len(v)-1], v[len(v)-1]
 		var d time.Duration
 		switch unit {
@@ -68,14 +65,27 @@ func ParseTime(flag, v string, loc *time.Location) (int64, error) {
 		}
 		return Now().Add(-time.Duration(n) * d).UnixMilli(), nil
 	}
-absolute:
 	if t, err := time.ParseInLocation("2006-01-02", v, loc); err == nil {
 		return t.UnixMilli(), nil
 	}
 	if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
 		return t.UnixMilli(), nil
 	}
-	return 0, bad("형식이 맞지 않습니다")
+	return 0, bad("기간(숫자+s|m|h|d|w), 날짜(YYYY-MM-DD), RFC3339 중 하나여야 합니다")
+}
+
+// relativeShape reports a value that looks like a relative period: an optional sign
+// and digits followed by exactly one letter ("7d", "90m", "5x"). Anything else that
+// ends in a letter ("foo", "2026-10-01T09:00:00Z") is not a relative period and is
+// reported as a format error (or parsed as an absolute time).
+func relativeShape(v string) bool {
+	body := strings.TrimPrefix(v[:len(v)-1], "-")
+	for _, c := range body {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func trimShow(s string) string {

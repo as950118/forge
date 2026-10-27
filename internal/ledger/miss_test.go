@@ -109,3 +109,37 @@ func TestMigration0003UpgradesExistingDB(t *testing.T) {
 		}
 	}
 }
+
+// Upgrading from 0001-0003: v_ledger_calls merges ok failure-first (TASK-0021 AC-2).
+func TestMigration0004UpgradesMergedOK(t *testing.T) {
+	ctx := context.Background()
+	oldFS := fstest.MapFS{}
+	for _, n := range []string{"0001_init.sql", "0002_mcp_tool_approvals.sql", "0003_misses_mcp_server.sql"} {
+		b, err := fs.ReadFile(db.Migrations(), n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		oldFS[n] = &fstest.MapFile{Data: b}
+	}
+	conn, err := store.OpenRaw(filepath.Join(t.TempDir(), "forge.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := store.Migrate(ctx, conn, oldFS); err != nil {
+		t.Fatal(err)
+	}
+	ins := `INSERT INTO ledger(ts,kind,name,client,session_id,tool_use_id,source,ok) VALUES (1,'tool','t','claude-code','s','u',?,?)`
+	exec(t, conn, ins, "hook", 1)
+	exec(t, conn, ins, "gateway", 0)
+	var ok int
+	if err := conn.QueryRow(`SELECT ok FROM v_ledger_calls`).Scan(&ok); err != nil || ok != 1 {
+		t.Fatalf("before the upgrade the view used MAX(ok): ok=%d err=%v", ok, err)
+	}
+	if err := store.Migrate(ctx, conn, db.Migrations()); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(`SELECT ok FROM v_ledger_calls`).Scan(&ok); err != nil || ok != 0 {
+		t.Errorf("after 0004 the merged ok must be 0 (failure first): ok=%d err=%v", ok, err)
+	}
+}

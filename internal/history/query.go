@@ -156,7 +156,7 @@ func (f Filter) outerWhere() where {
 // mcp_server, client, session_id and tool_use_id are one call; rows without a
 // tool_use_id are never merged), except that mcp_server is compared with '-' and
 // '_' equal (the hook sees the client's spelling, the gateway the registered
-// one; the view would keep such a pair as two calls) with deterministic aggregates and the extra
+// one; the view would keep such a pair as two calls) with deterministic aggregates (ok: failure first, MIN) and the extra
 // columns the CLI shows. The view itself is not used because it cannot be
 // narrowed before grouping and exposes neither error_class nor invocation.
 func mergedCTE(f Filter) (string, []any) {
@@ -200,7 +200,7 @@ func mergedCTELean(f Filter, c cteCols) (string, []any) {
 	}
 	return `calls AS (SELECT MIN(id) AS id, MIN(ts) AS ts, kind, name, COALESCE(MAX(mcp_server),'') AS mcp_server,
  COALESCE(MAX(client),'') AS client, ` + proj + `, ` + sess + `,
- MAX(ok) AS ok, MAX(latency_ms) AS latency_ms, MIN(found) AS found,
+ MIN(ok) AS ok, MAX(latency_ms) AS latency_ms, MIN(found) AS found,
  ` + src + `,
  ` + ec + `, ` + inv + `, '' AS tool_use_id
  FROM ` + from + w.sql() + `
@@ -606,4 +606,18 @@ SELECT kind, srv, name, client, COUNT(*), MIN(ts), MAX(ts) FROM m`+ow.sql()+` GR
 		res[i] = *m
 	}
 	return res, nil
+}
+
+// LargeLedgerRows is the (approximate) row count from which an aggregate without a
+// period is announced as slow (about 4 s at 1M rows on a laptop, linear in the rows).
+const LargeLedgerRows = 500_000
+
+// LedgerSizeHint returns an upper estimate of the ledger's row count in O(1)
+// (the highest rowid; deleted rows make it larger than the real count).
+func LedgerSizeHint(ctx context.Context, db *sql.DB) int64 {
+	var n sql.NullInt64
+	if err := db.QueryRowContext(ctx, `SELECT MAX(id) FROM ledger`).Scan(&n); err != nil || !n.Valid {
+		return 0
+	}
+	return n.Int64
 }

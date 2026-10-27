@@ -15,7 +15,7 @@ import (
 
 // RedactionVersion is the masking rule version stored with every payload
 // (ledger_payloads.redaction_version). Bump it when the rules change.
-const RedactionVersion = 3
+const RedactionVersion = 4
 
 const (
 	// MaxStringBytes caps every string value inside a stored payload.
@@ -29,7 +29,18 @@ const (
 
 var (
 	// "password=hunter2", "Authorization: Bearer xyz", "api_key: abc" embedded in free text.
-	inlineSecretRe = regexp.MustCompile(`(?i)((?:token|secret|passw(?:or)?d|passwd|api[_-]?key|apikey|authorization|credential|cookie|signature)[A-Za-z0-9_-]*\s*[=:]\s*)(?:bearer\s+|basic\s+)?[^\s"'&;,]+`)
+	// The value may be quoted ("x" or 'x', spaces allowed inside the quotes).
+	inlineSecretRe = regexp.MustCompile(`(?i)((?:token|secret|passw(?:or)?d|passwd|api[_-]?key|apikey|authorization|credential|cookie|signature)[A-Za-z0-9_-]*\s*[=:]\s*)(?:bearer\s+|basic\s+)?(?:"[^"\n]*"|'[^'\n]*'|[^\s"'&;,]+)`)
+	// TOKEN=ab cd: an upper-case environment-variable style name takes the whole
+	// unquoted value up to the next quote, '&', ';', ',' or the end of the line (the
+	// value may contain spaces). Runs before inlineSecretRe.
+	inlineEnvRe = regexp.MustCompile(`\b((?:[A-Z][A-Z0-9_]*)?(?:TOKEN|SECRET|PASSW(?:OR)?D|PASSWD|API_?KEY|APIKEY|AUTHORIZATION|CREDENTIAL|COOKIE|SIGNATURE)[A-Z0-9_]*=)[^\n"'&;,]*[^\s"'&;,]`)
+	// "-p x": the short password flag of many CLIs. Also matches "-p 22"; over-masking
+	// a display string is preferred over leaking a password.
+	inlineShortFlagRe = regexp.MustCompile(`(^|\s)(-p\s+)[^\s"'&;,-][^\s"'&;,]*`)
+	// Credential shapes that need no label: sk-..., GitHub tokens, JWT, AWS access key
+	// ids, "Bearer <token>".
+	inlineTokenRe = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{20,}|\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}|\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*|\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|(?i:\bbearer)\s+[A-Za-z0-9._~+/=-]{8,}`)
 	// "--token X", "--api-key X", "--password X" inside one string (space-separated form;
 	// the "=" form is covered by inlineSecretRe). The value must not itself look like a flag.
 	inlineFlagRe = regexp.MustCompile(`(?i)(--?[a-z0-9-]*(?:token|secret|passw(?:or)?d|passwd|api-?key|apikey|auth|cookie|credential|bearer)[a-z0-9-]*\s+)(?:bearer\s+|basic\s+)?[^\s"'&;,-][^\s"'&;,]*`)
@@ -148,10 +159,17 @@ func maskString(s string, persist bool) string {
 	if looksSecret(s, persist) {
 		return masked
 	}
+	return maskInlineText(s)
+}
+
+// maskInlineText applies every inline credential pattern (labelled and unlabelled).
+func maskInlineText(s string) string {
+	s = inlineTokenRe.ReplaceAllString(s, masked)
+	s = inlineEnvRe.ReplaceAllString(s, "${1}"+masked)
 	s = inlineSecretRe.ReplaceAllString(s, "${1}"+masked)
 	s = inlineFlagRe.ReplaceAllString(s, "${1}"+masked)
-	s = urlUserinfoRe.ReplaceAllString(s, "${1}"+masked+"${2}")
-	return s
+	s = inlineShortFlagRe.ReplaceAllString(s, "${1}${2}"+masked)
+	return urlUserinfoRe.ReplaceAllString(s, "${1}"+masked+"${2}")
 }
 
 func uniqueKey(m map[string]any, base string) string {
@@ -262,8 +280,4 @@ func MaskText(s string) string { return maskString(s, false) }
 // `password: ...`, `--token X`, URL userinfo). Unlike MaskText it never replaces a
 // whole value for looking random, so names and paths that merely contain long
 // identifiers (hash-suffixed gateway names, /var/folders/... temp dirs) stay readable.
-func MaskInline(s string) string {
-	s = inlineSecretRe.ReplaceAllString(s, "${1}"+masked)
-	s = inlineFlagRe.ReplaceAllString(s, "${1}"+masked)
-	return urlUserinfoRe.ReplaceAllString(s, "${1}"+masked+"${2}")
-}
+func MaskInline(s string) string { return maskInlineText(s) }

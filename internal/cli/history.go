@@ -26,6 +26,7 @@ type historyOpts struct {
 	format, output                                                                   string
 	asJSON, force, raw                                                               bool
 	groupBy                                                                          string
+	scanAll                                                                          bool // aggregate over the whole ledger unless --since is given
 }
 
 // Flag groups (which subcommand accepts which flags).
@@ -51,8 +52,12 @@ func historyCmd() *cobra.Command {
 RFC3339(2026-10-01T09:00:00+09:00) 를 줄 수 있습니다. --since 는 포함, --until 은 제외입니다.
 --name 은 정확히 일치, --name-contains 는 부분 일치(ASCII 대소문자 무시)입니다.
 --format table|json|csv (--json = --format json), --output 파일 은 새 파일만(덮어쓰기는 --force), 권한 0600.
+--output - 는 파일이 아니라 표준 출력입니다(파일 이름이 - 라면 ./- 로 쓰세요). --output 의 부모 디렉터리가 심볼릭 링크여도
+따라가서 씁니다(사용자가 고른 경로로 보고 허용). 마지막 구성요소가 심볼릭 링크이거나 Forge 저장소 파일이면 거부합니다.
+기간(--since)을 주지 않은 summary/top 은 원장 전체를 집계하므로 기록이 아주 많으면(100만 건 이상) 수 초 이상 걸립니다.
+이때는 --since 7d 처럼 기간을 주세요.
 day 집계는 UTC 날짜 기준입니다. 표의 시각은 로컬 시간대, JSON 은 UTC(RFC3339)와 epoch ms 입니다.`,
-		Args:          cobra.NoArgs,
+		Args:          noArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -88,7 +93,7 @@ day 집계는 UTC 날짜 기준입니다. 표의 시각은 로컬 시간대, JSO
 	pf.IntVar(&o.limit, "limit", history.DefaultLimit, fmt.Sprintf("최대 행 수 (1~%d)", history.MaxLimit))
 	pf.StringVar(&o.format, "format", "", "table|json|csv (기본 table)")
 	pf.BoolVar(&o.asJSON, "json", false, "JSON 출력 (--format json 과 같음)")
-	pf.StringVar(&o.output, "output", "", "결과를 파일로 저장 (새 파일만, 권한 0600)")
+	pf.StringVar(&o.output, "output", "", "결과를 파일로 저장 (새 파일만, 권한 0600). - 는 표준 출력")
 	pf.BoolVar(&o.force, "force", false, "--output 대상이 일반 파일이면 덮어쓰기 (심볼릭 링크는 항상 거부)")
 	cmd.Flags().BoolVar(&o.raw, "raw", false, "병합 전 원본 원장 행 보기")
 	cmd.Flags().StringVar(&o.groupBy, "group-by", "", "집계 기준 kind|name|client|project|day|source (summary 와 같음)")
@@ -101,7 +106,7 @@ func historySummaryCmd(o *historyOpts) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "summary",
 		Short: "Aggregate calls: count, ok/failed, avg/max latency, last call",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			g := o.groupBy
 			if g == "" {
@@ -125,6 +130,7 @@ func runSummary(cmd *cobra.Command, o *historyOpts, groupBy string) error {
 	if err := o.allow(cmd, append(append([]string{"group-by"}, filterFlags...), outFlags...)...); err != nil {
 		return err
 	}
+	o.scanAll = true
 	return o.run(cmd, func(ctx context.Context, db *sql.DB, f history.Filter, limit int, loc *time.Location) (history.Report, error) {
 		gs, err := history.Summary(ctx, db, f, groupBy, limit)
 		if err != nil {
@@ -138,11 +144,12 @@ func historyTopCmd(o *historyOpts) *cobra.Command {
 	return &cobra.Command{
 		Use:   "top",
 		Short: "Most used skills/tools/MCP tools (top N by calls, --limit N)",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := o.allow(cmd, append(append([]string{}, filterFlags...), outFlags...)...); err != nil {
 				return err
 			}
+			o.scanAll = true
 			return o.run(cmd, func(ctx context.Context, db *sql.DB, f history.Filter, limit int, loc *time.Location) (history.Report, error) {
 				gs, err := history.Summary(ctx, db, f, "name", limit)
 				if err != nil {
@@ -158,7 +165,7 @@ func historyUnusedCmd(o *historyOpts) *cobra.Command {
 	return &cobra.Command{
 		Use:   "unused",
 		Short: "Registered skills/tools/MCP servers with no call in the period (--kind, --since)",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := o.allow(cmd, append([]string{"kind", "since", "until"}, outFlags...)...); err != nil {
 				return err
@@ -178,7 +185,7 @@ func historyMissesCmd(o *historyOpts) *cobra.Command {
 	return &cobra.Command{
 		Use:   "misses",
 		Short: "Unregistered call names (found=0) of skills, tools and MCP tools (per MCP server)",
-		Args:  cobra.NoArgs,
+		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := o.allow(cmd, append([]string{"kind", "client", "since", "until", "limit"}, outFlags...)...); err != nil {
 				return err
@@ -206,7 +213,7 @@ func skillMissesCmd() *cobra.Command {
 (횟수, 첫/마지막 호출, 클라이언트별 분포). 읽기 전용입니다.
 plugin:skill 형태(클라이언트 플러그인 소유)와 결과를 알 수 없는 호출은 포함하지 않습니다.
 도구/MCP 의 미등록 호출은 forge history misses 를 쓰세요.`,
-		Args: cobra.NoArgs,
+		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := o.allow(cmd, append([]string{"since", "until", "client", "limit"}, outFlags...)...); err != nil {
 				return err
@@ -228,7 +235,7 @@ plugin:skill 형태(클라이언트 플러그인 소유)와 결과를 알 수 �
 	pf.IntVar(&o.limit, "limit", history.DefaultLimit, fmt.Sprintf("최대 행 수 (1~%d)", history.MaxLimit))
 	pf.StringVar(&o.format, "format", "", "table|json|csv (기본 table)")
 	pf.BoolVar(&o.asJSON, "json", false, "JSON 출력")
-	pf.StringVar(&o.output, "output", "", "결과를 파일로 저장 (새 파일만, 권한 0600)")
+	pf.StringVar(&o.output, "output", "", "결과를 파일로 저장 (새 파일만, 권한 0600). - 는 표준 출력")
 	pf.BoolVar(&o.force, "force", false, "--output 대상이 일반 파일이면 덮어쓰기")
 	return cmd
 }
@@ -346,16 +353,24 @@ func (o *historyOpts) run(cmd *cobra.Command, build buildFn) error {
 	if err != nil {
 		return err
 	}
-	db, err := history.Open(cmd.Context(), home)
+	db, note, err := history.OpenNote(cmd.Context(), home)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	if note != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), note)
+	}
+	if o.scanAll && f.Since == nil {
+		if n := history.LedgerSizeHint(cmd.Context(), db); n >= history.LargeLedgerRows {
+			fmt.Fprintf(cmd.ErrOrStderr(), "알림: 기록이 많아(약 %d건) 기간 없이 집계하면 시간이 걸립니다. --since 7d 처럼 기간을 주면 빨라집니다.\n", n)
+		}
+	}
 	rep, err := build(cmd.Context(), db, f, limit, loc)
 	if err != nil {
 		return err
 	}
-	if o.output == "" {
+	if o.output == "" || o.output == "-" { // "-" = standard output, like most CLIs
 		return rep.Write(cmd.OutOrStdout(), format)
 	}
 	var buf bytes.Buffer

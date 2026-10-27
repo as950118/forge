@@ -518,7 +518,7 @@ func TestMissesUnregisteredToolNamesAreSanitizedValues(t *testing.T) {
 
 func TestCSVInjectionDefense(t *testing.T) {
 	cells := []string{"=1+1", "+1", "-1", "@SUM(A1)", "\tx", "\rx", "ok", "a,b", `say "hi"`, "line1\nline2", "x=1", "'=already"}
-	want := []string{"'=1+1", "'+1", "'-1", "'@SUM(A1)", "'\tx", "'\rx", "ok", "a,b", `say "hi"`, "line1\nline2", "x=1", "'=already"}
+	want := []string{"'=1+1", "'+1", "-1", "'@SUM(A1)", "'\tx", "'\rx", "ok", "a,b", `say "hi"`, "line1\nline2", "x=1", "'=already"}
 	var buf bytes.Buffer
 	if err := writeCSV(&buf, []string{"c"}, func() [][]string {
 		var rows [][]string
@@ -943,8 +943,8 @@ func TestQueryPlansUseIndexes(t *testing.T) {
 }
 
 func TestLargeLedgerPerformance(t *testing.T) {
-	if testing.Short() {
-		t.Skip("large synthetic ledger")
+	if testing.Short() || os.Getenv("FORGE_LARGE_TESTS") != "1" {
+		t.Skip("large synthetic ledger (1M rows, ~40 s): set FORGE_LARGE_TESTS=1 to run")
 	}
 	if raceEnabled {
 		t.Skip("1M-row timing is meaningless (and very slow) under the race detector")

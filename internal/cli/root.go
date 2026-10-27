@@ -23,6 +23,7 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 		SilenceErrors: true,
 		Version:       info.Version,
 	}
+	root.SetFlagErrorFunc(localizeFlagError)
 	root.SetVersionTemplate(fmt.Sprintf("forge version %s (commit %s, built %s)\n", info.Version, info.Commit, info.Date))
 
 	root.AddCommand(
