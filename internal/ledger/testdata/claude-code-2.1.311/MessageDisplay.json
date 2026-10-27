@@ -1,0 +1,12 @@
+{
+  "cwd": "/tmp/fixture/project",
+  "delta": "<string>",
+  "final": true,
+  "hook_event_name": "MessageDisplay",
+  "index": 0,
+  "message_id": "00000000-0000-0000-0000-000000000000",
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "transcript_path": "/tmp/fixture/transcript.jsonl",
+  "turn_id": "00000000-0000-0000-0000-000000000000"
+}

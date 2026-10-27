@@ -1,0 +1,9 @@
+{
+  "cwd": "/tmp/fixture/project",
+  "hook_event_name": "UserPromptSubmit",
+  "permission_mode": "default",
+  "prompt": "<string>",
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "transcript_path": "/tmp/fixture/transcript.jsonl"
+}

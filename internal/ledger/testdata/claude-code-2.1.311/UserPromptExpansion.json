@@ -1,0 +1,13 @@
+{
+  "command_args": "",
+  "command_name": "forge-probe-skill",
+  "command_source": "projectSettings",
+  "cwd": "/tmp/fixture/project",
+  "expansion_type": "slash_command",
+  "hook_event_name": "UserPromptExpansion",
+  "permission_mode": "default",
+  "prompt": "<string>",
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "transcript_path": "/tmp/fixture/transcript.jsonl"
+}

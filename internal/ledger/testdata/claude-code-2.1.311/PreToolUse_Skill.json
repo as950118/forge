@@ -1,0 +1,16 @@
+{
+  "cwd": "/tmp/fixture/project",
+  "effort": {
+    "level": "low"
+  },
+  "hook_event_name": "PreToolUse",
+  "permission_mode": "default",
+  "prompt_id": "00000000-0000-0000-0000-000000000000",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "tool_input": {
+    "skill": "forge-probe-skill"
+  },
+  "tool_name": "Skill",
+  "tool_use_id": "toolu_FIXTURE",
+  "transcript_path": "/tmp/fixture/transcript.jsonl"
+}
