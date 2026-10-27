@@ -4,3 +4,7 @@
 dist/
 /forge
 *.test
+
+# 로컬 비밀(OpenRouter 토큰 등)
+.env
+.env.*
