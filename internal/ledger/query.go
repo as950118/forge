@@ -47,6 +47,7 @@ type Count struct {
 // Miss mirrors v_misses.
 type Miss struct {
 	Kind, Name      string
+	MCPServer       string // kind=mcp only ("" otherwise)
 	Count           int
 	FirstTS, LastTS int64
 }
@@ -118,7 +119,7 @@ FROM ledger GROUP BY kind, name ORDER BY count(*) DESC, kind, name`)
 
 // Misses lists requested-but-unregistered skills/tools (v_misses).
 func (r *SQLite) Misses(ctx context.Context) ([]Miss, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT kind, name, miss_count, first_ts, last_ts FROM v_misses ORDER BY miss_count DESC, kind, name`)
+	rows, err := r.DB.QueryContext(ctx, `SELECT kind, name, COALESCE(mcp_server,''), miss_count, first_ts, last_ts FROM v_misses ORDER BY miss_count DESC, kind, mcp_server, name`)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +127,7 @@ func (r *SQLite) Misses(ctx context.Context) ([]Miss, error) {
 	var out []Miss
 	for rows.Next() {
 		var m Miss
-		if err := rows.Scan(&m.Kind, &m.Name, &m.Count, &m.FirstTS, &m.LastTS); err != nil {
+		if err := rows.Scan(&m.Kind, &m.Name, &m.MCPServer, &m.Count, &m.FirstTS, &m.LastTS); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

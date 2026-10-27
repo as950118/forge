@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/heonjinjeong/forge/internal/mcp"
@@ -14,7 +15,7 @@ import (
 
 // RedactionVersion is the masking rule version stored with every payload
 // (ledger_payloads.redaction_version). Bump it when the rules change.
-const RedactionVersion = 2
+const RedactionVersion = 3
 
 const (
 	// MaxStringBytes caps every string value inside a stored payload.
@@ -40,7 +41,8 @@ var (
 
 // Known limits (documented, not bugs): secrets shorter than the value-pattern
 // thresholds, secrets stored as JSON numbers or booleans under non-secret key
-// names, and homoglyph key names (see foldKey) are not recognized. Key names
+// names, and look-alike characters outside the confusables table (see normKey) are
+// not recognized. Array flag elements ("--token" followed by its value) use foldKey only. Key names
 // containing secret words (token, password, ...) are always masked regardless
 // of the value type.
 //
@@ -98,7 +100,7 @@ func maskValue(v any, depth int, persist bool) any {
 				base = masked
 			}
 			name := uniqueKey(m, base)
-			if mcp.LooksSecret(foldKey(k)) {
+			if keyLooksSecret(k) {
 				m[name] = masked
 				continue
 			}
@@ -164,13 +166,48 @@ func uniqueKey(m map[string]any, base string) string {
 	}
 }
 
+// keyLooksSecret reports whether a JSON key name implies a secret value. It checks
+// the folded name and the normalized name (normKey), so "pass-word", "api.key",
+// "p\u0430ssword" (Cyrillic a) and "pa\u0301ssword" (combining accent) are recognized.
+func keyLooksSecret(k string) bool {
+	f := foldKey(k)
+	return mcp.LooksSecret(f) || mcp.LooksSecret(normKey(f))
+}
+
+// normKey normalizes a key name for secret-word matching: combining marks (Mn) are
+// dropped, separators (Unicode Pd dashes, Pc connectors, Zs spaces, Cf format characters, plus '.') are removed, letters are lower-cased,
+// and a small table of Cyrillic/Greek look-alikes is folded to Latin.
+func normKey(k string) string {
+	var b strings.Builder
+	for _, r := range k {
+		switch {
+		case unicode.In(r, unicode.Mn, unicode.Pd, unicode.Pc, unicode.Zs, unicode.Cf), r == 0x2212, r == '-', r == '_', r == ' ', r == '.':
+			continue
+		}
+		r = unicode.ToLower(r)
+		if l, ok := confusables[r]; ok {
+			r = l
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// confusables maps representative Cyrillic and Greek look-alikes (lower case) to Latin.
+// Known limit: characters absent from this table are not folded; docs/security.md.
+var confusables = map[rune]rune{
+	0x0430: 'a', 0x0435: 'e', 0x043E: 'o', 0x0440: 'p', 0x0441: 'c', 0x0443: 'y', 0x0445: 'x',
+	0x0455: 's', 0x0456: 'i', 0x0458: 'j', 0x04BB: 'h', 0x0501: 'd', 0x051B: 'q', 0x051D: 'w',
+	0x043A: 'k', 0x0442: 't', 0x043C: 'm', 0x043D: 'h', 0x0432: 'b', 0x0433: 'r',
+	0x03B1: 'a', 0x03B5: 'e', 0x03BF: 'o', 0x03C1: 'p', 0x03BA: 'k', 0x03B9: 'i', 0x03BD: 'v',
+	0x03C5: 'u', 0x03C7: 'x', 0x03C4: 't', 0x03B7: 'n', 0x03BC: 'u', 0x03C9: 'w', 0x03B2: 'b',
+}
+
 // foldKey prepares a key name for the secret-name rules: zero-width / bidi
 // control characters are removed and compatibility characters are folded to
 // ASCII. This is a stdlib approximation of NFKC (golang.org/x/text is not a
 // dependency): fullwidth forms, mathematical alphanumerics and circled letters
-// are covered. Known limit: homoglyphs from other scripts (e.g. Cyrillic "а"
-// for "a") are not folded, so "pаssword" is not recognized by key name; such
-// values are still caught by the value-pattern rules when they look like secrets.
+// are covered. Homoglyphs, combining marks and separators are handled by normKey.
 func foldKey(k string) string {
 	var b strings.Builder
 	for _, r := range k {

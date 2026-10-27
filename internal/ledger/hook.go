@@ -57,7 +57,7 @@ type claudePayload struct {
 	AgentID       string          `json:"agent_id"`
 	ToolName      string          `json:"tool_name"`
 	ToolUseID     string          `json:"tool_use_id"`
-	DurationMS    *float64        `json:"duration_ms"`
+	DurationMS    *float64        `json:"-"` // decoded leniently by decodePayload
 	ToolInput     json.RawMessage `json:"tool_input"`
 	ToolResponse  json.RawMessage `json:"tool_response"`
 }
@@ -111,11 +111,11 @@ func ingest(ctx context.Context, in io.Reader, opts HookOptions) error {
 	if int64(len(data)) > opts.MaxInput {
 		return fmt.Errorf("입력이 %d 바이트를 넘습니다", opts.MaxInput)
 	}
-	var p claudePayload
-	if err := json.Unmarshal(data, &p); err != nil {
-		return fmt.Errorf("hook JSON 이 올바르지 않습니다")
+	p, err := decodePayload(data)
+	if err != nil {
+		return err
 	}
-	ev, phase, err := MapClaudeHook(&p, opts.Event)
+	ev, phase, err := MapClaudeHook(p, opts.Event)
 	if err != nil {
 		return err
 	}
@@ -145,6 +145,27 @@ func ingest(ctx context.Context, in io.Reader, opts HookOptions) error {
 	}
 	_, err = rec.Record(ctx, ev)
 	return err
+}
+
+// decodePayload decodes a hook payload. duration_ms is decoded on its own and
+// leniently: a value that is not a finite JSON number (1e999 overflows float64, a
+// string, null, an object) only leaves the duration unknown (nil -> NULL) instead
+// of discarding the whole payload.
+func decodePayload(data []byte) (*claudePayload, error) {
+	var p claudePayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("hook JSON 이 올바르지 않습니다")
+	}
+	var d struct {
+		DurationMS json.RawMessage `json:"duration_ms"`
+	}
+	if json.Unmarshal(data, &d) == nil && len(d.DurationMS) > 0 && string(d.DurationMS) != "null" {
+		var f float64
+		if json.Unmarshal(d.DurationMS, &f) == nil {
+			p.DurationMS = &f
+		}
+	}
+	return &p, nil
 }
 
 // MapClaudeHook converts a hook payload to an Event. Built-in tools and

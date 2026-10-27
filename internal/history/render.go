@@ -330,7 +330,7 @@ func MissesReport(ms []Miss, loc *time.Location) Report {
 	r.JSON = map[string]any{"count": len(masked), "misses": masked}
 	r.Notes = []string{
 		"미등록 호출 이름: Forge 레지스트리에 없는 이름으로 호출된 기록(found=0)입니다. 도구 이름은 기록 시 정화·120바이트로 잘린 값이며 실제 도구명이 아닐 수 있습니다.",
-		"사용자가 클라이언트에 직접 붙인 MCP 서버·내장 도구의 호출도 포함될 수 있습니다(거짓 양성).",
+		"레지스트리에 없는 MCP 서버의 hook 호출은 사용자가 직접 붙인 서버일 수 있어 miss 로 세지 않습니다(found 미상, TASK-0019). 게이트웨이가 found=0 으로 명시한 호출만 MCP miss 로 나옵니다.",
 	}
 	return r
 }

@@ -167,6 +167,12 @@ ORDER BY (name = ?) DESC, (scope='global') DESC, id LIMIT 1`, ev.MCPServer, ev.M
 		if ev.Kind == KindSkill && !registered && strings.Contains(ev.Name, ":") {
 			found = nil
 		}
+		// An MCP server that is not in the Forge registry was attached by the user
+		// directly (e.g. `claude mcp add`); the call itself proves it exists, so this is
+		// not a miss: found stays NULL (unknown).
+		if ev.Kind == KindMCP && !registered {
+			found = nil
+		}
 	}
 
 	var id int64
