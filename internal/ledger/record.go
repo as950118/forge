@@ -123,6 +123,22 @@ func (r *SQLite) Record(ctx context.Context, ev Event) (int64, error) {
 		client = ev.Client
 	}
 
+	// A gateway row that carries the client's tool_use_id may already have been joined
+	// with its hook row (session_id replaced by the hook's, see linkCall) between the
+	// call's Start and End records. Keep addressing that row instead of inserting a
+	// second one under the gateway's own "gw-" session.
+	if clientKnown > 0 && ev.Source == SourceGateway && ev.ToolUseID != "" && strings.HasPrefix(ev.SessionID, GatewaySessionPrefix) {
+		var joined string
+		err := tx.QueryRowContext(ctx, `
+SELECT session_id FROM ledger WHERE source='gateway' AND client=? AND tool_use_id=? AND session_id IS NOT NULL AND substr(session_id,1,3) != ?
+ORDER BY id DESC LIMIT 1`, ev.Client, ev.ToolUseID, GatewaySessionPrefix).Scan(&joined)
+		if err == nil {
+			ev.SessionID = joined
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return 0, err
+		}
+	}
+
 	var skillID, toolID, mcpID sql.NullInt64
 	skillVersion := ev.SkillVersion
 	var registered bool

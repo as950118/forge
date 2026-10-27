@@ -11,8 +11,9 @@ const (
 // IdentifyClient maps MCP initialize.clientInfo.name onto a Forge client id.
 // Only exact/prefix matches of known names count; anything else is "" (unknown)
 // and gets the conservative exposure. The names are what the clients are known
-// to send (claude-code, opencode) but were not captured from a live session in
-// this task (docs/gateway.md, "unverified"); --client overrides detection.
+// to send. claude-code was confirmed in a live Claude Code 2.1.311 session
+// (TASK-0029, docs/clients/claude-code.md); the opencode name is still unconfirmed
+// from a live session (docs/gateway.md). --client overrides detection.
 func IdentifyClient(clientInfoName string) string {
 	n := strings.ToLower(strings.TrimSpace(clientInfoName))
 	switch {

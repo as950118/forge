@@ -72,6 +72,12 @@ func (c *callRecorder) Record(ctx context.Context, ev ledger.Event) (int64, erro
 }
 
 func (g *Gateway) begin(client, version, kind string, name safeName, server, invocation string, args json.RawMessage) *call {
+	return g.beginWithID(client, version, kind, name, server, invocation, "", args)
+}
+
+// beginWithID is begin with the client's own tool_use_id (already vetted by
+// toolUseIDFrom; "" = none).
+func (g *Gateway) beginWithID(client, version, kind string, name safeName, server, invocation, toolUseID string, args json.RawMessage) *call {
 	if g.o.Recorder == nil {
 		return &call{g: g, done: true}
 	}
@@ -80,7 +86,7 @@ func (g *Gateway) begin(client, version, kind string, name safeName, server, inv
 		Rec: g.o.Recorder, Client: client, ClientVersion: version,
 		Project: ledger.NormalizeProject(g.o.Project), SessionID: g.o.SessionID,
 	}
-	c.gc = &ledger.GatewayCall{Kind: kind, Name: string(name), MCPServer: server, Invocation: invocation}
+	c.gc = &ledger.GatewayCall{Kind: kind, Name: string(name), MCPServer: server, Invocation: invocation, ToolUseID: toolUseID}
 	c.safe(func(ctx context.Context) error { return c.rec.Start(ctx, c.gc) })
 	return c
 }
@@ -158,7 +164,7 @@ func (g *Gateway) callTool(ctx context.Context, ss *sdk.ServerSession, p *sdk.Ca
 		}
 		return nil, &jsonrpc.Error{Code: jsonrpc.CodeInvalidParams, Message: fmt.Sprintf("알 수 없는 도구입니다 (노출되지 않았거나 비활성): \"%s\". forge_list 로 사용 가능한 도구를 확인하세요", cleanName(p.Name))}
 	}
-	c := g.beginFor(client, version, e, p.Arguments)
+	c := g.beginFor(client, version, e, p.Arguments, toolUseIDFrom(client, p.Meta))
 	var args map[string]any
 	if len(p.Arguments) > 0 && string(p.Arguments) != "null" {
 		if err := json.Unmarshal(p.Arguments, &args); err != nil {
@@ -183,13 +189,47 @@ func (g *Gateway) callTool(ctx context.Context, ss *sdk.ServerSession, p *sdk.Ca
 	return res, nil
 }
 
+// metaToolUseID is the Claude Code private key under tools/call params._meta that
+// carries the tool_use_id of the call (observed in a live Claude Code 2.1.311
+// session, TASK-0029; single observation, see docs/clients/claude-code.md).
+const metaToolUseID = "claudecode/toolUseId"
+
+// maxToolUseIDLen bounds an accepted id. Claude Code ids look like "toolu_01..."
+// (about 30 bytes); the ledger itself allows 256.
+const maxToolUseIDLen = 128
+
+// toolUseIDFrom returns the client's tool_use_id from params._meta, or "" when it
+// must be ignored. Only for client == claude-code: the key is Claude Code's own name,
+// so another client (or an unidentified one) sending it would give the id a meaning
+// it does not have, and such rows have no Claude Code hook row to merge with anyway.
+// A missing key, a non-string value, an empty or over-long value, or any character
+// outside [A-Za-z0-9_-] (control, bidi, zero-width and every non-ASCII character
+// included) is ignored without an error: the call is recorded without an id and the
+// time-window linking of internal/ledger stays the fallback.
+func toolUseIDFrom(client string, meta sdk.Meta) string {
+	if client != ClientClaudeCode || meta == nil {
+		return ""
+	}
+	v, ok := meta[metaToolUseID].(string)
+	if !ok || v == "" || len(v) > maxToolUseIDLen {
+		return ""
+	}
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+			return ""
+		}
+	}
+	return v
+}
+
 // beginFor opens the ledger row for a catalog entry. Meta tools record their own rows.
-func (g *Gateway) beginFor(client, version string, e *entry, raw json.RawMessage) *call {
+func (g *Gateway) beginFor(client, version string, e *entry, raw json.RawMessage, toolUseID string) *call {
 	switch e.Kind {
 	case kindCustom:
-		return g.begin(client, version, ledger.KindTool, cleanName(e.Tool), "", "", raw)
+		return g.beginWithID(client, version, ledger.KindTool, cleanName(e.Tool), "", "", toolUseID, raw)
 	case kindProxy:
-		return g.begin(client, version, ledger.KindMCP, cleanName(e.Upstream), e.Server, "", raw)
+		return g.beginWithID(client, version, ledger.KindMCP, cleanName(e.Upstream), e.Server, "", toolUseID, raw)
 	}
 	return &call{g: g, done: true}
 }
