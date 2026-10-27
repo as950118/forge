@@ -187,6 +187,7 @@ Makefile 타깃:
 |------|---------|
 | `make build` | `dist/forge` 빌드 |
 | `make test` | 스키마 스냅샷 검사 후 `go test ./...` |
+| `make test-perf` | 엄격한 시간 한도(`FORGE_PERF_TESTS=1`, 원장 100만 행 시험 포함)로 순차 실행. 한가한 호스트에서만 사용 |
 | `make lint` | `golangci-lint`(없으면 `go vet` + `gofmt` 검사) |
 | `make fmt` | `gofmt -w .` |
 | `make check-schema` | `db/schema.sql` 이 마이그레이션 이어 붙임과 같은지 검사 |
@@ -202,7 +203,7 @@ Makefile 타깃:
 go test ./... -short
 ```
 
-`-short` 는 오래 걸리는 시험(예: 원장 100만 행 성능 시험)을 건너뜁니다. 전체 시험(`make test`)에는 그 100만 행 성능 시험이 포함되며 **호스트 부하에 민감**해 부하가 높으면 느려지거나 시간 제한에 걸릴 수 있습니다. 그럴 때는 `go test ./... -short -count=1 -p 1` 처럼 패키지를 순차 실행하세요. 테스트는 임시 `HOME`/`FORGE_HOME` 을 쓰며 실제 `~/.forge` 와 클라이언트 설정을 건드리지 않습니다.
+`-short` 는 오래 걸리는 시험(예: 원장 100만 행 성능 시험)을 건너뜁니다. 전체 시험(`make test`)에는 그 100만 행 성능 시험이 포함되며 **호스트 부하에 민감**해 부하가 높으면 느려지거나 시간 제한에 걸릴 수 있습니다. 그럴 때는 `go test ./... -short -count=1 -p 1` 처럼 패키지를 순차 실행하세요. 기본 실행의 시간 단언은 느슨한 상한(정확성은 항상 단언)이라 hook 당 지연 같은 성능 회귀는 `make test-perf`(엄격 모드)에서만 잡힙니다. `TMPDIR` 가 100자보다 길면 테스트가 짧은 `/tmp` 하위 디렉터리를 대신 씁니다. 테스트는 임시 `HOME`/`FORGE_HOME` 을 쓰며 실제 `~/.forge` 와 클라이언트 설정을 건드리지 않습니다.
 
 ## 라이선스
 

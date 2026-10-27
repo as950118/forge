@@ -6,7 +6,7 @@ DATE     ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS  := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 TARGETS  := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
 
-.PHONY: build test lint fmt check-schema release-snapshot clean demo docs-check quickstart-check
+.PHONY: build test test-perf lint fmt check-schema release-snapshot clean demo docs-check quickstart-check
 
 build:
 	@mkdir -p dist
@@ -14,6 +14,11 @@ build:
 
 test: check-schema
 	go test ./...
+
+# Strict time budgets (hook 2s, doctor/history limits) for an idle machine; the default
+# run only has loose bounds so a busy host does not fail it. Serial packages (-p 1).
+test-perf: check-schema
+	FORGE_PERF_TESTS=1 FORGE_LARGE_TESTS=1 go test ./... -count=1 -p 1
 
 # db/schema.sql (snapshot) must equal all migrations concatenated in order (ADR-F0001 D5; TASK-0013 changed the rule from "== 0001").
 # Regenerate: cat db/migrations/*.sql > db/schema.sql
