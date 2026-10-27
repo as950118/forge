@@ -53,6 +53,18 @@
           }
         ]
       }
+    ],
+    "UserPromptExpansion": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "forge hook ingest --client claude-code --event post",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   },
   "model": "sonnet"

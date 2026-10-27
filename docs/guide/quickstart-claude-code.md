@@ -12,7 +12,7 @@
 |------|------|
 | 스킬 | `<프로젝트>/.claude/skills/<이름>/` (관리 마커 `.forge-managed` 포함) |
 | MCP 서버 | `<프로젝트>/.mcp.json` 의 `mcpServers` (게이트웨이 항목 `forge` + 노출이 `direct` 인 서버) |
-| 이력 hook | `<프로젝트>/.claude/settings.json` 의 `hooks` (`PreToolUse`·`PostToolUse`·`PostToolUseFailure`) |
+| 이력 hook | `<프로젝트>/.claude/settings.json` 의 `hooks` (`PreToolUse`·`PostToolUse`·`PostToolUseFailure`·`UserPromptExpansion`) |
 | Forge 상태 | `<프로젝트>/.forge/sync-state.json` (Forge 가 쓴 항목의 해시 기록) |
 
 사용자가 직접 쓴 항목(다른 MCP 서버, `permissions`, 사용자 hook)은 수정하지 않습니다. Forge 가 쓴 항목은 상태 파일에 해시로 기록되고, 내용이 사람 손으로 바뀌었으면 덮어쓰지 않고 **충돌**로 멈춥니다.

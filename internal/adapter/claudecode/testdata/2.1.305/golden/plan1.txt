@@ -1,16 +1,17 @@
 forge sync: claude-code  scope=project  root=<PROJ>
 모드: 계획만 출력합니다 (파일을 쓰지 않음). 적용하려면 --apply 를 지정하세요.
 
-종류    이름                  작업   이유
-스킬    demo-skill          추가   레지스트리 1.0.0
-MCP   gw-proxied          건너뜀  exposure=gateway: 게이트웨이(forge)가 프록시하므로 직접 쓰지 않음
-MCP   hidden-one          건너뜀  exposure=hidden: 노출하지 않음
-MCP   forge               추가   게이트웨이 서버 (forge mcp serve)
-MCP   fs-direct           추가   직접 노출 서버
-MCP   remote-direct       추가   직접 노출 서버
-hook  PostToolUse         추가   호출 원장 수집 hook (matcher Skill|mcp__.*)
-hook  PostToolUseFailure  추가   호출 원장 수집 hook (matcher Skill|mcp__.*)
-hook  PreToolUse          추가   호출 원장 수집 hook (matcher Skill|mcp__.*)
+종류    이름                   작업   이유
+스킬    demo-skill           추가   레지스트리 1.0.0
+MCP   gw-proxied           건너뜀  exposure=gateway: 게이트웨이(forge)가 프록시하므로 직접 쓰지 않음
+MCP   hidden-one           건너뜀  exposure=hidden: 노출하지 않음
+MCP   forge                추가   게이트웨이 서버 (forge mcp serve)
+MCP   fs-direct            추가   직접 노출 서버
+MCP   remote-direct        추가   직접 노출 서버
+hook  PostToolUse          추가   호출 원장 수집 hook (matcher Skill|mcp__.*)
+hook  PostToolUseFailure   추가   호출 원장 수집 hook (matcher Skill|mcp__.*)
+hook  PreToolUse           추가   호출 원장 수집 hook (matcher Skill|mcp__.*)
+hook  UserPromptExpansion  추가   호출 원장 수집 hook (matcher .*)
 
 쓸 파일:
   생성  <PROJ>/.claude/skills/demo-skill
@@ -87,7 +88,7 @@ diff (비밀 값은 *** 로 가림):
  }
 --- <PROJ>/.claude/settings.json
 +++ <PROJ>/.claude/settings.json
-@@ -21,7 +21,36 @@
+@@ -21,7 +21,48 @@
        {
          "matcher": "Skill|mcp__.*",
          "hooks": [
@@ -122,12 +123,24 @@ diff (비밀 값은 *** 로 가림):
 +            "command": "forge hook ingest --client claude-code --event post",
 +            "timeout": 5
 +          }
++        ]
++      }
++    ],
++    "UserPromptExpansion": [
++      {
++        "matcher": ".*",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "forge hook ingest --client claude-code --event post",
++            "timeout": 5
++          }
          ]
        }
      ]
 --- /dev/null
 +++ <PROJ>/.forge/sync-state.json
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,55 @@
 +{
 +  "version": 1,
 +  "target": "claude-code",
@@ -149,6 +162,12 @@ diff (비밀 값은 *** 로 가림):
 +      "kind": "hook",
 +      "name": "PreToolUse :: Skill|mcp__.* :: forge hook ingest --client claude-code --event pre",
 +      "hash": "da35721439de586aecbdca37c5157ac35f2196142cd8fa0763fef28f5926bfb9",
++      "applied_at": "2026-10-22T00:00:00Z"
++    },
++    {
++      "kind": "hook",
++      "name": "UserPromptExpansion :: .* :: forge hook ingest --client claude-code --event post",
++      "hash": "f22d623f967b8206743a84c45febdbd54cabf971835fdd06ddf8e16228dd81ab",
 +      "applied_at": "2026-10-22T00:00:00Z"
 +    },
 +    {
@@ -178,4 +197,4 @@ diff (비밀 값은 *** 로 가림):
 +  ]
 +}
 
-요약: 추가 7 · 변경 0 · 삭제 0 · 충돌 0 · 건너뜀 2 · 변경 없음 0
+요약: 추가 8 · 변경 0 · 삭제 0 · 충돌 0 · 건너뜀 2 · 변경 없음 0
