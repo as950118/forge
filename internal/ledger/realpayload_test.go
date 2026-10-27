@@ -96,13 +96,3 @@ func TestRealPayloadIngest(t *testing.T) {
 		t.Errorf("asker: %+v", f)
 	}
 }
-
-// UserPromptExpansion is a known payload but not ingested yet (TASK-0028): it must be ignored
-// without error output side effects.
-func TestRealUserPromptExpansionIgnoredForNow(t *testing.T) {
-	rec, home := newRec(t)
-	_ = IngestHook(payload(loadRealFixture(t, "UserPromptExpansion")), hookOpts(home))
-	if rows, _ := rec.Recent(context.Background(), 5, Filter{}); len(rows) != 0 {
-		t.Fatalf("rows=%+v", rows)
-	}
-}

@@ -22,6 +22,12 @@
       "applied_at": "2026-10-22T00:00:00Z"
     },
     {
+      "kind": "hook",
+      "name": "UserPromptExpansion :: .* :: forge hook ingest --client claude-code --event post",
+      "hash": "f22d623f967b8206743a84c45febdbd54cabf971835fdd06ddf8e16228dd81ab",
+      "applied_at": "2026-10-22T00:00:00Z"
+    },
+    {
       "kind": "mcp",
       "name": "forge",
       "hash": "6ad4169773e48a4602878e625356c9cac78e27d8808a313ce3918108f1b36e6f",

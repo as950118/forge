@@ -57,7 +57,8 @@ type claudePayload struct {
 	AgentID       string          `json:"agent_id"`
 	ToolName      string          `json:"tool_name"`
 	ToolUseID     string          `json:"tool_use_id"`
-	DurationMS    *float64        `json:"-"` // decoded leniently by decodePayload
+	CommandName   string          `json:"command_name"` // UserPromptExpansion only; command_args/prompt are never declared
+	DurationMS    *float64        `json:"-"`            // decoded leniently by decodePayload
 	ToolInput     json.RawMessage `json:"tool_input"`
 	ToolResponse  json.RawMessage `json:"tool_response"`
 }
@@ -66,6 +67,9 @@ const (
 	phasePre = iota
 	phasePost
 	phaseFailure
+	// phaseExpansion is a UserPromptExpansion (user-typed /name). It has no result,
+	// duration or tool_use_id.
+	phaseExpansion
 )
 
 // IngestHook reads one Claude Code hook payload from in and records it. The
@@ -137,6 +141,20 @@ func ingest(ctx context.Context, in io.Reader, opts HookOptions) error {
 	}
 	defer conn.Close()
 	rec := &SQLite{DB: conn}
+	if phase == phaseExpansion {
+		// Record only commands that are skills in the Forge registry: built-in and
+		// third-party commands are not Forge's business, and recording them would
+		// create misses (ADR-F0002) for names Forge never owned. No payload is stored.
+		reg, err := skillRegistered(ctx, conn, ev.Name)
+		if err != nil {
+			return err
+		}
+		if !reg {
+			return fmt.Errorf("%w: Forge 에 등록된 스킬이 아닙니다 %q", ErrIgnored, cut(ev.Name))
+		}
+		_, err = rec.Record(ctx, ev)
+		return err
+	}
 	if rec.PayloadEnabled(ctx) {
 		ev.Input = p.ToolInput
 		if phase != phasePre {
@@ -145,6 +163,16 @@ func ingest(ctx context.Context, in io.Reader, opts HookOptions) error {
 	}
 	_, err = rec.Record(ctx, ev)
 	return err
+}
+
+// skillRegistered reports whether name is a skill known to the Forge registry
+// (same lookup as Record).
+func skillRegistered(ctx context.Context, q queryer, name string) (bool, error) {
+	var n int
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM skills WHERE name = ?`, name).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // decodePayload decodes a hook payload. duration_ms is decoded on its own and
@@ -180,6 +208,8 @@ func MapClaudeHook(p *claudePayload, eventFlag string) (Event, int, error) {
 		phase = phasePost
 	case "PostToolUseFailure":
 		phase = phaseFailure
+	case "UserPromptExpansion":
+		phase = phaseExpansion
 	case "":
 		switch eventFlag {
 		case "pre":
@@ -188,15 +218,28 @@ func MapClaudeHook(p *claudePayload, eventFlag string) (Event, int, error) {
 			phase = phasePost
 		}
 	}
-	// TODO(UserPromptExpansion): a user-typed /skill bypasses PreToolUse. The docs only
-	// confirm that the event's matcher is the command name; the payload field names
-	// are [미확인], so invocation=user is not implemented until a fixture is captured.
 	if phase < 0 {
 		return Event{}, 0, fmt.Errorf("%w: 지원하지 않는 이벤트 %q", ErrIgnored, cut(p.HookEventName))
 	}
 	ev := Event{
 		Client: ClientClaudeCode, Source: SourceHook,
 		Project: NormalizeProject(p.Cwd), SessionID: p.SessionID, AgentID: p.AgentID, ToolUseID: p.ToolUseID,
+	}
+	if phase == phaseExpansion {
+		// A user-typed /name (docs/clients/claude-code.md §6, [실측 2.1.311]): no PreToolUse
+		// and no tool_use_id. Only the name is kept; command_args and prompt are never
+		// decoded or stored. Whether the name is a Forge skill is decided at ingest time
+		// (expansionRegistered); command_source/expansion_type values are not relied on.
+		name := NormalizeSkillName(p.CommandName)
+		if name == "" {
+			return Event{}, 0, fmt.Errorf("%w: UserPromptExpansion 에 command_name 이 없습니다", ErrIgnored)
+		}
+		ev.ToolUseID = ""
+		ev.Kind, ev.Name, ev.Invocation = KindSkill, name, InvocationUser
+		if err := ev.Validate(); err != nil {
+			return Event{}, 0, err
+		}
+		return ev, phase, nil
 	}
 	switch {
 	case p.ToolName == "Skill":
@@ -268,16 +311,20 @@ func ClaudeCodeSnippet(bin string) ([]byte, error) {
 	cmd := func(event string) string {
 		return shellQuote(bin) + " hook ingest --client claude-code --event " + event
 	}
-	handler := func(event string) []map[string]any {
+	handlerFor := func(event, matcher string) []map[string]any {
 		return []map[string]any{{
-			"matcher": "Skill|mcp__.*",
+			"matcher": matcher,
 			"hooks":   []map[string]any{{"type": "command", "command": cmd(event), "timeout": 5}},
 		}}
 	}
+	handler := func(event string) []map[string]any { return handlerFor(event, "Skill|mcp__.*") }
 	doc := map[string]any{"hooks": map[string]any{
 		"PreToolUse":         handler("pre"),
 		"PostToolUse":        handler("post"),
 		"PostToolUseFailure": handler("post"),
+		// matcher of this event is the command name; ".*" (all commands) is not confirmed
+		// against a real client [미확인]. Non-skill names are dropped at ingest.
+		"UserPromptExpansion": handlerFor("post", ".*"),
 	}}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

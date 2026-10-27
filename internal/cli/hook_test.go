@@ -136,3 +136,31 @@ func TestHookTimeoutFromEnv(t *testing.T) {
 		}
 	}
 }
+
+// UserPromptExpansion end to end (TASK-0028): a registered skill typed by the user is
+// recorded as invocation=user with a silent exit; an unregistered name leaves no row.
+func TestHookIngestUserPromptExpansion(t *testing.T) {
+	forgeHome(t)
+	mustRun(t, "init")
+	_, conn, _ := openRegistry(t.Context())
+	defer conn.Close()
+	if _, err := conn.Exec(`INSERT INTO skills(scope,name,description) VALUES ('global','demo','d')`); err != nil {
+		t.Fatal(err)
+	}
+	mk := func(name string) string {
+		return `{"hook_event_name":"UserPromptExpansion","session_id":"s-u","cwd":"/tmp/p","expansion_type":"slash_command",` +
+			`"command_name":"` + name + `","command_args":"FAKE-SECRET-ARG","command_source":"projectSettings","prompt":"/` + name + ` FAKE-SECRET-ARG"}`
+	}
+	for _, name := range []string{"demo", "context", "ghost"} {
+		out, errOut, err := hookRun(t, mk(name), "hook", "ingest", "--client", "claude-code")
+		if err != nil || out != "" || errOut != "" {
+			t.Fatalf("%s: %v %q %q", name, err, out, errOut)
+		}
+	}
+	var n, miss int
+	_ = conn.QueryRow(`SELECT count(*) FROM ledger WHERE kind='skill' AND name='demo' AND invocation='user' AND source='hook' AND found=1 AND tool_use_id IS NULL`).Scan(&n)
+	_ = conn.QueryRow(`SELECT count(*) FROM ledger`).Scan(&miss)
+	if n != 1 || miss != 1 {
+		t.Errorf("demo rows=%d total=%d", n, miss)
+	}
+}

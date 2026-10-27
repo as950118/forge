@@ -64,7 +64,7 @@ forge sync --prune-backups [--keep 20] [--dry-run]       # 오래된 백업 삭�
 
 - **스킬**: 레지스트리에서 활성(enabled)인 스킬의 현재 버전(`~/.forge/skills/<name>@<ver>/`)의 파일 트리를 복사한다. 파일 0644(실행 비트 있으면 0755), 디렉터리 0755 — 읽기 전용 스냅샷 모드는 물려받지 않는다. 심볼릭 링크가 있거나 내용 해시가 등록값과 다르면(변조) 복사하지 않고 충돌로 보고한다. 디렉터리 안에 관리 마커 `.forge-managed`(name, version, tree_hash)를 둔다. SKILL.md 에는 아무것도 추가하지 않는다.
 - **MCP(project)**: `.mcp.json` 에 (a) 게이트웨이 항목 `forge`(`type: stdio`, `command` = `--bin`, `args` = `mcp serve --client claude-code`)와 (b) exposure=`direct` 인 활성 서버를 쓴다. `type` 은 항상 명시한다(Claude Code 는 `type` 없는 `url` 항목을 stdio 로 보아 설정 오류로 건너뜀). 값은 `${VAR}` 참조 그대로이며, 렌더 직전에 레지스트리 검증(`mcp.Spec.Validate`)을 다시 거쳐 리터럴 비밀이 있으면 렌더를 거부한다. `exposure=gateway` 서버는 게이트웨이가 프록시하므로 쓰지 않고, `hidden` 은 쓰지 않는다. `cwd` 가 있는 서버와 keychain 참조 서버는 `.mcp.json` 형식으로 표현할 수 없어 건너뛴다(`gateway` 사용). `timeout_ms` 는 Claude Code 쪽 단위가 미확인이라 렌더하지 않는다.
-- **hook**: `ledger.ClaudeCodeSnippet` 과 같은 내용(`PreToolUse`/`PostToolUse`/`PostToolUseFailure`, matcher `Skill|mcp__.*`, `forge hook ingest ...`)을 `hooks` 에 **handler 단위로** 병합한다. 같은 matcher 그룹에 사용자가 넣은 handler 가 있으면 그 그룹은 그대로 두고 Forge handler 만 뒤에 추가한다. 제거도 handler 단위(우리가 만든 빈 그룹/이벤트/`hooks` 만 정리).
+- **hook**: `ledger.ClaudeCodeSnippet` 과 같은 내용(`PreToolUse`/`PostToolUse`/`PostToolUseFailure`, matcher `Skill|mcp__.*`; 사용자 `/스킬명` 용 `UserPromptExpansion`, matcher `.*`; `forge hook ingest ...`)을 `hooks` 에 **handler 단위로** 병합한다. 같은 matcher 그룹에 사용자가 넣은 handler 가 있으면 그 그룹은 그대로 두고 Forge handler 만 뒤에 추가한다. 제거도 handler 단위(우리가 만든 빈 그룹/이벤트/`hooks` 만 정리).
 
 ## OpenCode (`--target opencode`, TASK-0011)
 
