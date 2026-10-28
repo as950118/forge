@@ -48,12 +48,25 @@ type BackupRef struct {
 
 func safe(s string) string { return textsafe.Display(s, 300) }
 
+// Limits for the free-text fields (bytes after escaping). A Korean sentence takes
+// about three bytes per character, so the 300 bytes of safe() cut a note or a
+// reason in the middle of the advice it exists to give (TASK-0027 AC-19). The
+// table still shortens a reason for its cell and prints the rest below it.
+const (
+	maxReasonBytes = 700
+	maxNoteBytes   = 2400
+)
+
+func safeReason(s string) string { return textsafe.Display(s, maxReasonBytes) }
+func safeNote(s string) string   { return textsafe.Display(s, maxNoteBytes) }
+
 // Table cells are display-only: they are cut to a fixed number of characters so
 // that one very long name cannot stretch the table across hundreds of columns.
 // --json keeps the full (sanitized) strings.
 const (
 	maxNameCell   = 80
 	maxReasonCell = 120
+	wrapWidth     = 140 // width of the continuation lines below the table
 )
 
 func cell(s string, max int) string {
@@ -62,6 +75,17 @@ func cell(s string, max int) string {
 		return s
 	}
 	return string(r[:max-1]) + "…"
+}
+
+// wrapRunes cuts s into lines of at most width characters (display only).
+func wrapRunes(s string, width int) []string {
+	r := []rune(s)
+	var out []string
+	for len(r) > width {
+		out = append(out, string(r[:width]))
+		r = r[width:]
+	}
+	return append(out, string(r))
 }
 
 func truncatedCells(rows []Item) bool {
@@ -91,7 +115,7 @@ func BuildReport(p *Plan, res *ApplyResult, withDiff bool) *Report {
 	}
 	for _, it := range p.Items {
 		r.Summary[string(it.Action)]++
-		it.Name, it.Reason, it.Path = safe(it.Name), safe(it.Reason), safe(it.Path)
+		it.Name, it.Reason, it.Path = safe(it.Name), safeReason(it.Reason), safe(it.Path)
 		r.Items = append(r.Items, it)
 	}
 	for _, f := range p.Ops {
@@ -101,7 +125,7 @@ func BuildReport(p *Plan, res *ApplyResult, withDiff bool) *Report {
 		r.Commands = append(r.Commands, textsafe.EscapeExcept(c, ""))
 	}
 	for _, in := range p.Interrupted {
-		in.ID, in.Kind, in.CreatedAt = safe(in.ID), safe(in.Kind), safe(in.CreatedAt)
+		in.ID, in.Kind, in.CreatedAt, in.RestoreOf = safe(in.ID), safe(in.Kind), safe(in.CreatedAt), safe(in.RestoreOf)
 		r.Interrupted = append(r.Interrupted, in)
 	}
 	for _, id := range p.LostBackups {
@@ -111,7 +135,7 @@ func BuildReport(p *Plan, res *ApplyResult, withDiff bool) *Report {
 		r.StaleTempFiles = append(r.StaleTempFiles, safe(t))
 	}
 	for _, n := range p.Notes {
-		r.Notes = append(r.Notes, safe(n))
+		r.Notes = append(r.Notes, safeNote(n))
 	}
 	if withDiff {
 		r.Diff = append([]FileDiff{}, p.Diffs...)
@@ -188,12 +212,26 @@ func WriteTextAs(w io.Writer, p *Plan, res *ApplyResult, withDiff bool, mode str
 		fmt.Fprintf(w, "경고: 이전 sync 가 중단되었고 그 백업(%s)이 삭제되어 이어서 완료하거나 되돌릴 수 없습니다 (저널 사본만 남음).\n", id)
 		fmt.Fprintln(w, "      그 sync 가 만든 항목은 충돌로 보입니다. 안전한 해소: --skip-conflicts (충돌 항목만 제외). --force-managed 는 이 충돌에 효과가 없습니다. 자세한 내용은 아래 참고.")
 	}
-	if len(r.Interrupted) > 0 {
+	// Only an interrupted SYNC is finished by --apply; a restore is never resumed
+	// automatically (its own line above says what to run), so the two statements
+	// must not appear for the same interruption (TASK-0027 AC-19).
+	syncs, restores := 0, 0
+	for _, in := range r.Interrupted {
+		if in.Kind == "restore" {
+			restores++
+		} else {
+			syncs++
+		}
+	}
+	if syncs > 0 {
 		if res == nil {
-			fmt.Fprintln(w, "      --apply 는 현재 파일을 다시 계획해 이어서 완료합니다 (그 사이 수정한 파일은 건드리지 않고 충돌로 보고, 바꾸는 파일은 먼저 새 백업에 보존).")
+			fmt.Fprintln(w, "      --apply 는 중단된 sync 를 현재 파일을 다시 계획해 이어서 완료합니다 (그 사이 수정한 파일은 건드리지 않고 충돌로 보고, 바꾸는 파일은 먼저 새 백업에 보존).")
 		} else {
 			fmt.Fprintln(w, "      이번 --apply 가 중단된 sync 를 이어서 완료했습니다.")
 		}
+	}
+	if restores > 0 && res == nil {
+		fmt.Fprintln(w, "      --apply 는 중단된 restore 를 이어 하지 않습니다 (레지스트리 기준으로 새로 계획한 sync 만 적용하고 이 중단 기록은 닫습니다). 복원을 끝내려면 위 forge sync --restore 명령을 먼저 실행하세요.")
 	}
 	if res == nil && len(r.StaleTempFiles) > 0 {
 		fmt.Fprintf(w, "정리 예정: 중단된 sync 가 남긴 임시 파일 %d개 (--apply 시 삭제)\n", len(r.StaleTempFiles))
@@ -226,7 +264,21 @@ func WriteTextAs(w io.Writer, p *Plan, res *ApplyResult, withDiff bool, mode str
 		}
 		_ = tw.Flush()
 		if truncatedCells(rows) {
-			fmt.Fprintln(w, "(긴 이름/이유는 표에서 줄였습니다. 전체는 --json 으로 볼 수 있습니다)")
+			// The cut text is often the way out (the advice ends the reason), so the
+			// full text follows the table (display-limited), not only --json.
+			fmt.Fprintln(w, "(긴 이름/이유는 표에서 줄였습니다. 줄인 항목의 전체 내용은 아래에 이어서 보이며 --json 으로도 볼 수 있습니다)")
+			for _, it := range rows {
+				if len([]rune(it.Name)) > maxNameCell || len([]rune(it.Reason)) > maxReasonCell {
+					head := fmt.Sprintf("  - %s %s: ", kindLabel[it.Kind], cell(it.Name, maxNameCell))
+					for i, ln := range wrapRunes(it.Reason, wrapWidth) {
+						if i == 0 {
+							fmt.Fprintln(w, head+ln)
+						} else {
+							fmt.Fprintln(w, "      "+ln)
+						}
+					}
+				}
+			}
 		}
 	}
 	if len(p.Ops) == 0 && r.Conflicts == 0 {

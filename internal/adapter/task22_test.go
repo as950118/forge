@@ -128,9 +128,11 @@ func TestDiffAnnouncesSecretOnlyChange(t *testing.T) {
 	if p := writeDiffOp("/x/cfg.json", `{"a":"1"}`+"\n", `{"a":"2"}`+"\n"); p.Diffs[0].SecretChanges != 0 || strings.Contains(allDiff(p), "비밀 값 변경") {
 		t.Fatal("announced a change that is not secret")
 	}
-	// Text of a plain file shows both masked lines, so nothing is hidden.
-	if p := writeDiffOp("/x/a.md", "token: FAKEVALUE1\n", "token: FAKEVALUE2\n"); p.Diffs[0].SecretChanges != 0 {
-		t.Fatalf("text change counted as hidden: %+v", p.Diffs)
+	// Text of a plain file shows both masked lines (identical). TASK-0027 AC-18
+	// changed this on purpose: such a change is now announced as well, see
+	// TestDiffAnnouncesSecretOnlyChangeInText.
+	if p := writeDiffOp("/x/a.md", "token: FAKEVALUE1\n", "token: FAKEVALUE2\n"); !strings.Contains(allDiff(p), "token: ***") {
+		t.Fatalf("the masked text lines disappeared: %+v", p.Diffs)
 	}
 }
 

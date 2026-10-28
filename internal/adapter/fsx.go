@@ -352,6 +352,13 @@ func copyTree(src, dst string, dirMode fs.FileMode, fileMode func(rel string, sr
 			out.Close()
 			return err
 		}
+		// Data first, name later: the tree is renamed into place only after its
+		// files are on disk (a power loss must not leave empty files under the
+		// final name; TASK-0027 AC-6).
+		if err := out.Sync(); err != nil {
+			out.Close()
+			return err
+		}
 		return out.Close()
 	})
 }

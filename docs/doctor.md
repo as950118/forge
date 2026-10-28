@@ -47,7 +47,7 @@ Forge 홈·DB, 클라이언트 설치, sync 드리프트, 깨진 경로, 이력,
 | 클라이언트 | `claude`/`opencode` 탐지·버전 | 아래 "버전 게이팅" |
 | 드리프트 | (target, scope) 별 Plan 을 읽기 전용으로 계산 | 충돌=warn(`--diff`/`--force-managed`/`--skip-conflicts` 명령), 미적용 변경=warn(`--apply`), 일치=ok. 링크 거부(심볼릭/하드링크)·해석 불가 JSON·잘못된 상태 파일은 원인과 함께 warn |
 | | 중단된 sync | 저널이 남음=warn(`--apply` 로 이어서 완료) · 믿을 수 없는 저널(손상/변조)=warn(`--list-backups`) · 임시 파일=info |
-| | **백업 의존성** (TASK-0022 AC-1/8) | 저널 사본(`<repo>/.forge/sync-journal*.json`)은 있는데 `~/.forge/backups/<id>` 가 없음=warn. 복구가 백업에 의존하며 계획의 "충돌"이 오도할 수 있음을 알리고 `--diff`, `--apply --force-managed`, `--skip-conflicts`, 저널 사본 삭제 명령 제시. 저널의 id 는 형식 검증 후에만 경로로 쓴다 |
+| | **백업 의존성** (TASK-0022 AC-1/8) | 저널 사본(`<repo>/.forge/sync-journal*.json`)은 있는데 `~/.forge/backups/<id>` 가 없음=warn. `pending` 인 사본만 대상(완료·롤백된 사본은 무시). 복구가 `$FORGE_HOME/backups` 의 백업에 의존한다는 한계(백업을 지우거나 `--prune-backups` 로 정리하면 중단 복구가 불가능)와 계획의 "충돌"이 오도할 수 있음을 알리고 `--diff`, `--skip-conflicts`, 직접 확인 후 삭제·이름 변경, 저널 사본 삭제를 제시한다. `--force-managed` 는 이 충돌에 효과가 없어(`LostBackupReason`) 권하지 않는다. 계획(`forge sync`)의 같은 사유(`lost_backups`)와 짝이다. 저널의 id 는 형식 검증 후에만 경로로 쓴다 |
 | 경로·연결 | 관리 중인 스킬 디렉터리 누락 | warn (`--apply` 로 재생성) |
 | | MCP 항목의 `command` 존재 | 관리 항목만 대상. `exec.LookPath`/stat 으로 **존재만** 확인(실행 금지), 없음·상대 경로=warn |
 | | 게이트웨이 항목의 forge 경로 | 없는 명령·상대 경로·현재 forge 바이너리와 다른 바이너리=warn(`--apply --bin <현재 바이너리>`) |

@@ -337,6 +337,9 @@ func (e *env) backupDependency(p *planned) []Check {
 			"저널 사본을 해석할 수 없습니다: "+safe(p.plan.JournalPath, 200), "저널 사본이 손상되었거나 변조되었습니다",
 			"ls -l "+e.q(p.plan.JournalPath), "forge sync --list-backups")}
 	}
+	if j.Status != "pending" { // a finished or rolled-back journal needs no backup
+		return nil
+	}
 	dir := filepath.Join(e.o.Home, "backups", j.ID)
 	if fi, err := os.Lstat(dir); err == nil && fi.IsDir() {
 		return nil
@@ -344,9 +347,10 @@ func (e *env) backupDependency(p *planned) []Check {
 	sync := "forge sync " + p.flags(e)
 	return []Check{mk("drift."+p.target+"."+string(p.scope)+".backup", "drift", "중단된 sync 의 백업 "+p.target+"/"+string(p.scope), Warn,
 		fmt.Sprintf("저널 사본(백업 %s)이 있는데 백업 디렉터리가 없습니다", safe(j.ID, 40)),
-		"중단된 sync 의 복구는 "+e.o.Home+"/backups 의 백업에 의존합니다. 백업이 지워져 복구할 수 없고, 계획이 \"충돌\"을 잘못 보고할 수 있습니다 (직접 수정한 것이 아닐 수 있음)",
+		"중단된 sync 의 복구는 "+e.o.Home+"/backups 의 백업에 의존합니다(FORGE_HOME 을 지우거나 --prune-backups 로 정리하면 사라짐). 백업이 지워져 복구할 수 없고, 계획이 \"충돌\"을 잘못 보고할 수 있습니다 (직접 수정한 것이 아닐 수 있음). "+
+			"--force-managed 는 상태 파일에 기록된 항목만 덮어쓰므로 이 충돌에는 효과가 없습니다",
 		sync+" --diff   # 실제 차이 확인",
-		sync+" --apply --force-managed   # 관리 항목을 레지스트리 기준으로 덮어씀(새 백업 생성)",
-		sync+" --apply --skip-conflicts   # 충돌 항목만 제외",
+		sync+" --apply --skip-conflicts   # 충돌 항목만 제외하고 나머지 적용(적용이 끝나면 저널 사본은 정리되고, 제외한 항목은 일반 문구의 충돌로 다시 보입니다)",
+		"해당 항목의 내용을 직접 확인한 뒤 지우거나 이름을 바꾸고 "+sync+" --apply",
 		"rm "+e.q(p.plan.JournalPath)+"   # 복구를 포기하고 저널 사본 삭제(위 방법으로 정리한 뒤)")}
 }

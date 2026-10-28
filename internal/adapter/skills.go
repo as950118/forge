@@ -37,6 +37,12 @@ func IsManagedSkillDir(dir, name string) bool {
 	if err != nil || !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
 		return false
 	}
+	// Lstat follows links in the parent components, so "below a link" needs its own
+	// check: the resolved path must be the path itself (callers pass a resolved
+	// root; TASK-0027 AC-16).
+	if r, err := filepath.EvalSymlinks(dir); err != nil || r != filepath.Clean(dir) {
+		return false
+	}
 	mk, _, ok := readMarker(dir)
 	return ok && mk.Name == name
 }
@@ -160,8 +166,15 @@ func TamperedSnapshotReason(name string) string {
 	return "레지스트리 스냅샷 변조·손상(해시 불일치) — forge skill check " + name
 }
 
+// HardLinkedSnapshotReason is the conflict reason for a registry snapshot that
+// contains a hard-linked file (TASK-0027 AC-19): refused without reading it, which
+// is not the same as a content hash mismatch.
+func HardLinkedSnapshotReason(name string) string {
+	return "레지스트리 스냅샷 안에 하드링크된 파일이 있어 읽지 않습니다(해시 불일치가 아님) — forge skill check " + name
+}
+
 // TamperedSnapshotHelp is the resolution text of a tampered registry snapshot.
-const TamperedSnapshotHelp = "변조·손상된 레지스트리 스냅샷은 sync 되지 않습니다(--force-managed 는 효과 없음). " +
+const TamperedSnapshotHelp = "변조·손상되었거나 하드링크된 파일을 가진 레지스트리 스냅샷은 sync 되지 않습니다(--force-managed 는 효과 없음). " +
 	"forge skill check <이름> 으로 확인하고, 변조가 맞으면 forge skill remove <이름> --yes 후 신뢰하는 소스에서 다시 추가하세요."
 
 func (pl *Planner) planSkill(s SkillInput, pol SkillPolicy) {
@@ -186,6 +199,12 @@ func (pl *Planner) planSkill(s SkillInput, pol SkillPolicy) {
 	wantHash, _, err := TreeHash(s.StoreDir, false)
 	if err != nil || (s.Hash != "" && wantHash != s.Hash) {
 		it.Tampered = true
+		if errors.Is(err, ErrHardLinked) {
+			// Not a hash mismatch: a file of the registry snapshot has another name
+			// (maybe ~/.ssh/...). It is never read; say so instead of "tampered".
+			conflict(HardLinkedSnapshotReason(s.Name), false)
+			return
+		}
 		conflict(TamperedSnapshotReason(s.Name), false)
 		return
 	}

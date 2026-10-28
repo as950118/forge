@@ -305,6 +305,27 @@ func effectiveEntries(a Adapter, backupDir string, m *Manifest, bdir string) ([]
 	return out, created, nil
 }
 
+// legacyRestoreOf reports whether a restore journal without restore_of was
+// putting back backup m: it has operations, and each one targets a path of m and
+// ends in the state m recorded as "before" for it. Only a status flag depends on
+// this; nothing is written or deleted because of it.
+func legacyRestoreOf(j *Journal, m *Manifest) bool {
+	if len(j.Ops) == 0 {
+		return false
+	}
+	want := map[string]FileState{}
+	for _, e := range m.Entries {
+		want[e.Path] = e.Before
+	}
+	for _, o := range j.Ops {
+		b, ok := want[o.Path]
+		if !ok || o.AfterExists != b.Exists || (b.Exists && o.AfterHash != b.Hash) {
+			return false
+		}
+	}
+	return true
+}
+
 // resumeInterruptedRestores marks the pending journals of earlier restores of the
 // same backup (same target, scope and root) as recovered by the restore that just
 // completed, so a finished resume does not keep showing up as an interruption.
@@ -320,7 +341,13 @@ func resumeInterruptedRestores(backupDir string, m *Manifest, by string) {
 		}
 		j, err := loadJournal(backupDir, e.Name())
 		if err != nil || j.Status != JournalPending || j.Kind != "restore" || j.ID != e.Name() ||
-			j.RestoreOf != m.ID || j.Target != m.Target || j.Scope != m.Scope || j.Root != m.Root {
+			j.Target != m.Target || j.Scope != m.Scope || j.Root != m.Root {
+			continue
+		}
+		// A journal written before restore_of existed names no backup: it is this
+		// restore's only when every one of its operations puts back exactly what m
+		// recorded for that path (TASK-0027 AC-17).
+		if j.RestoreOf != m.ID && !(j.RestoreOf == "" && legacyRestoreOf(j, m)) {
 			continue
 		}
 		ids = append(ids, e.Name())

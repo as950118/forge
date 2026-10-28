@@ -180,6 +180,10 @@ func applyOps(ctx context.Context, a Adapter, meta manifestMeta, ops []Op, opts 
 			return nil, fmt.Errorf("백업 디렉터리 생성 실패: %w", err)
 		}
 	}
+	// The new directory's entry must survive a power loss together with the
+	// journal copy that will point at it (otherwise the copy outlives its backup:
+	// the "lost backup" case; TASK-0027 AC-6).
+	syncDir(opts.BackupDir)
 	m := &Manifest{Version: 1, ID: id, CreatedAt: now.Format(time.RFC3339), Kind: meta.Kind, Target: meta.Target,
 		Scope: meta.Scope, Root: meta.Root, Status: StatusPending, CreatedDirs: created, Note: meta.Note, Supersedes: meta.Supersedes, RestoreOf: meta.RestoreOf}
 	abortBackup := func(err error) (*ApplyResult, error) {
@@ -433,6 +437,23 @@ func executeOp(op Op, crash crashFn) error {
 	return fmt.Errorf("알 수 없는 작업: %s", op.Kind)
 }
 
+// writeSyncedFile is os.WriteFile plus an fsync.
+func writeSyncedFile(path string, data []byte, mode fs.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 func replaceTree(op Op, crash crashFn) error {
 	dir, base := filepath.Dir(op.Path), filepath.Base(op.Path)
 	tmp := filepath.Join(dir, tempName(tmpPrefix, base))
@@ -456,7 +477,7 @@ func replaceTree(op Op, crash crashFn) error {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		if err := os.WriteFile(filepath.Join(tmp, n), op.Tree.Extra[n], 0o644); err != nil {
+		if err := writeSyncedFile(filepath.Join(tmp, n), op.Tree.Extra[n], 0o644); err != nil {
 			_ = removeTree(tmp)
 			return err
 		}
@@ -475,7 +496,10 @@ func replaceTree(op Op, crash crashFn) error {
 			return err
 		}
 		crash.at("tree-new-renamed")
-		return removeTree(old)
+		syncDir(dir) // the new name is durable before the old tree is deleted
+		err := removeTree(old)
+		syncDir(dir)
+		return err
 	}
 	if err := os.Rename(tmp, op.Path); err != nil {
 		_ = removeTree(tmp)
