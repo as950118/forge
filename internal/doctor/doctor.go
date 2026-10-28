@@ -109,15 +109,48 @@ type env struct {
 	dbErr      error
 	dbState    string // "" | "missing" | "unreadable"
 	plans      map[string]*planned
+	// inexact holds the quoted paths that q() could not reproduce exactly (control
+	// or invisible characters shown as escapes, or a cut path): a command that
+	// contains one must not be pasted blindly (see noteInexact).
+	inexact map[string]bool
 }
 
 func (e *env) q(path string) string {
 	for _, r := range path {
 		if textsafe.NeedsEscape(r) {
-			return "'" + strings.ReplaceAll(textsafe.Display(path, 300), "'", `'\''`) + "'"
+			out := "'" + strings.ReplaceAll(textsafe.Display(path, 300), "'", `'\''`) + "'"
+			if e.inexact == nil {
+				e.inexact = map[string]bool{}
+			}
+			e.inexact[out] = true
+			return out
 		}
 	}
 	return adapter.ShellQuote(path)
+}
+
+// inexactNote is appended to a check whose fix commands name a path that is shown
+// with visible escapes (AC-3 of TASK-0024). The escapes are safe to print but are
+// literal text in a shell, so the command would act on a different path.
+const inexactNote = "# 주의: 위 명령의 경로에는 제어·비가시 문자가 있어 \\x1b, \\u202e 같은 보이는 이스케이프로 표시했습니다. 그대로 붙여 넣으면 실제 경로와 다른 경로를 가리킵니다. ls -b 등으로 실제 이름을 확인한 뒤 직접 입력하세요"
+
+// noteInexact adds inexactNote to every check with such a command (before the
+// fix list is capped, so the note is never cut off by the cap's "생략" line).
+func (e *env) noteInexact(c *Check) {
+	if len(e.inexact) == 0 {
+		return
+	}
+	for _, f := range c.Fix {
+		for q := range e.inexact {
+			if strings.Contains(f, q) {
+				if len(c.Fix) >= maxFixes {
+					c.Fix = c.Fix[:maxFixes-1]
+				}
+				c.Fix = append(c.Fix, inexactNote)
+				return
+			}
+		}
+	}
 }
 
 // projFlag is " --project-dir <root>" for fix commands of project-scoped
@@ -205,6 +238,7 @@ func Run(ctx context.Context, o Options) *Report {
 	for i := range rep.Checks {
 		c := &rep.Checks[i]
 		c.Message, c.Cause = clean(c.Message), clean(c.Cause)
+		e.noteInexact(c)
 		if len(c.Fix) > maxFixes {
 			c.Fix = append(c.Fix[:maxFixes], "# … 외 "+fmt.Sprint(len(c.Fix)-maxFixes)+"개 생략")
 		}

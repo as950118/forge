@@ -22,7 +22,7 @@ const (
 func checkHistory(e *env) []Check {
 	conn, err := e.database()
 	if err != nil {
-		return []Check{mk("history.skipped", "history", "이력", Info, "forge.db 를 읽을 수 없어 이력 점검을 건너뜁니다", "먼저 위 DB 점검의 해결 방법을 따르세요")}
+		return []Check{e.dbSkipped("history.skipped", "history", "이력", "이력")}
 	}
 	var out []Check
 	out = append(out, e.hookActivity(conn)...)

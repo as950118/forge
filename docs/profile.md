@@ -107,6 +107,9 @@ claude-code 가 `.claude/skills` 에 관리하는 스킬은 opencode 계획이 �
 
 ## 6. 알려진 한계
 
+- **`--from-current` 는 스냅샷이다**(TASK-0024 AC-11): 만든 뒤의 레지스트리 변경은 프로필에 자동 반영되지 않는다. 새로 등록한 스킬·도구·MCP 는 멤버가 아니라 노출되지 않고(`forge profile add`), `disable` 한 항목은 멤버여도 노출되지 않으며(`enabled` 가 우선), `remove` 한 항목은 프로필에서도 사라진다(삭제 확인 문구가 영향받는 프로필을 보여 준다. 삭제 후 doctor 가 알리는 것은 삭제 이력이 없어 불가능, 비어 있는 활성 프로필만 경고: `docs/doctor.md`). `create --from-current` 출력에도 같은 안내가 나온다.
+- 이미 갈라진 `projects` 행(같은 디렉터리의 대소문자 변형 등)은 **합치지 않는다**. `forge doctor` 가 `profile.projects.duplicate` 로 info 알림만 한다. 조회는 입력한 철자와 정확히 같은 행을 먼저, 없으면 id 가 가장 작은 행을 쓴다.
+- 클라이언트마다 다른 프로필을 쓰면 OpenCode 가 `.claude/skills` 도 읽기 때문에 claude-code 프로필에서 `direct` 인 스킬은 opencode 프로필이 숨겨도 보인다. `forge doctor` 가 `profile.crossclient` 로 경고한다(실제로 숨기는 대칭 처리는 하지 않음).
 - 프로젝트가 이동·삭제돼도 `profile_activations` 는 **자동으로 지우지 않는다**(이동일 수 있어 사용자 판단이 필요하다). 아무 영향은 없고 `forge doctor` 가 경고하며 `forge profile prune-stale` 로 정리한다(ADR-F0001 O-4 에 대한 구현 정책: 자동 삭제 없음, 명시적 정리 명령. ADR 문서는 바꾸지 않았다).
 - 경로 동일성은 `stat`/`SameFile` 에 의존한다: 다른 사용자의 권한 없는 디렉터리·끊긴 마운트는 "같은지 알 수 없음"이라 별개 프로젝트로 남을 수 있다. 하드링크된 디렉터리는 없다고 보고, 유니코드 정규화(NFC/NFD) 철자 차이는 따로 다루지 않는다(같은 디렉터리로 열리는 철자면 `SameFile` 이 묶지만 그 동작은 파일 시스템에 따라 확인하지 않았다).
 - `.forge/forge.yaml` 매니페스트로 프로필을 git 으로 공유하는 기능은 없다(M7).

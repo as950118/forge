@@ -84,6 +84,19 @@ func (e *env) database() (*sql.DB, error) {
 	return conn, nil
 }
 
+// dbSkipped is the finding of a check group that needs the database when the
+// database cannot be used. A database that does not exist yet (before
+// `forge init`) is normal: info. Any other failure (unreadable, corrupt, not a
+// Forge database) means the group was NOT checked: warn. The reason is reported
+// once, by the "db.*" findings; this message only points at it.
+func (e *env) dbSkipped(id, group, title, what string) Check {
+	if errors.Is(e.dbErr, errNoDB) {
+		return mk(id, group, title, Info, what+" 점검을 건너뜁니다: forge.db 가 아직 없습니다", "초기화 전입니다", "forge init")
+	}
+	return mk(id, group, title, Warn, "점검 불가: DB 를 사용할 수 없어 "+what+" 점검을 건너뜁니다 (이유는 위 DB 점검 항목 참조)",
+		"이 점검은 forge.db 가 필요합니다. 점검되지 않았으므로 정상으로 보면 안 됩니다", "forge doctor --scope project   # DB 점검의 해결 방법을 따른 뒤 다시 실행")
+}
+
 func isCtx(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }

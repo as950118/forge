@@ -124,7 +124,7 @@ func checkDrift(e *env) []Check {
 	var out []Check
 	homeForPlan := e.o.UserHome
 	if _, err := e.database(); err != nil {
-		return []Check{mk("drift.skipped", "drift", "sync 드리프트", Info, "forge.db 를 읽을 수 없어 드리프트 점검을 건너뜁니다: "+safe(err.Error(), 160), "먼저 위 DB 점검의 해결 방법을 따르세요")}
+		return []Check{e.dbSkipped("drift.skipped", "drift", "sync 드리프트", "드리프트")}
 	}
 	for _, sc := range e.scope {
 		if sc == adapter.ScopeProject && e.projectErr != nil {

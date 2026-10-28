@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 func checkProfile(e *env) []Check {
 	conn, err := e.database()
 	if err != nil {
-		return []Check{mk("profile.skipped", "profile", "프로필", Info, "forge.db 를 읽을 수 없어 프로필 점검을 건너뜁니다", "먼저 위 DB 점검의 해결 방법을 따르세요")}
+		return []Check{e.dbSkipped("profile.skipped", "profile", "프로필", "프로필")}
 	}
 	clients, err := profile.Clients(e.ctx, conn)
 	if err != nil {
@@ -25,6 +26,7 @@ func checkProfile(e *env) []Check {
 	var out []Check
 	seen := map[int64]bool{}
 	var actives []*profile.Resolved
+	byClient := map[string]*profile.Resolved{}
 	for _, c := range clients {
 		r, err := profile.Resolve(e.ctx, conn, c, e.project)
 		if err != nil {
@@ -45,6 +47,7 @@ func checkProfile(e *env) []Check {
 			where = "전역 활성화"
 		}
 		out = append(out, mk("profile.rule."+c, "profile", "프로필 규칙 "+c, OK, fmt.Sprintf("프로필 %s 적용 (%s; 멤버 %d, 허용 목록)", safe(r.Profile.Name, 60), where, len(r.Skills)+len(r.Tools)+len(r.MCP)), ""))
+		byClient[c] = r
 		if !seen[r.Profile.ID] {
 			seen[r.Profile.ID] = true
 			actives = append(actives, r)
@@ -54,8 +57,49 @@ func checkProfile(e *env) []Check {
 	for _, r := range actives {
 		out = append(out, e.profileHealth(r, clients)...)
 	}
+	out = append(out, e.crossProfileOverlap(byClient)...)
+	out = append(out, e.duplicateProjects()...)
 	out = append(out, e.staleActivations()...)
 	return out
+}
+
+// crossProfileOverlap (TASK-0024 AC-6): claude-code and opencode apply DIFFERENT
+// profiles, and a skill that the claude-code profile renders as direct
+// (.claude/skills) is not direct in the opencode profile (hidden, gateway or not a
+// member). OpenCode reads .claude/skills too, so it still sees the skill. The
+// same-profile case is claudeOpenCodeOverlap; this one needs both resolutions.
+func (e *env) crossProfileOverlap(byClient map[string]*profile.Resolved) []Check {
+	cc, oc := byClient["claude-code"], byClient["opencode"]
+	if cc == nil || oc == nil || cc.Profile.ID == oc.Profile.ID {
+		return nil
+	}
+	var names []string
+	for n, ex := range cc.Skills {
+		if ex != profile.ExposureDirect {
+			continue
+		}
+		if oc.Skills[n] != profile.ExposureDirect {
+			names = append(names, safe(n, 50))
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	pflag := ""
+	if cc.Profile.Scope == profile.ScopeProject {
+		pflag = " --project-dir " + e.q(cc.Profile.Project)
+	}
+	return []Check{mk("profile.crossclient", "profile", "클라이언트별 프로필의 스킬 노출 불일치", Warn,
+		fmt.Sprintf("claude-code 프로필 %s 에서는 direct 인 스킬 %d건이 opencode 프로필 %s 에서는 direct 가 아닙니다: %s", safe(cc.Profile.Name, 40), len(names), safe(oc.Profile.Name, 40), listNames(names)),
+		"OpenCode 는 .claude/skills 도 읽으므로 claude-code 에 렌더링된 스킬은 opencode 프로필이 숨기거나 빼도 OpenCode 에 보입니다 (opencode 에서만 숨길 수 없음). 다른 프로필을 클라이언트별로 쓸 때의 한계입니다",
+		"forge profile current --client all   # 클라이언트별 적용 프로필 확인",
+		"forge profile add "+adapter.ShellQuote(cc.Profile.Name)+pflag+" --skill "+adapter.ShellQuote(sortedFirst(names))+" --exposure hidden --client claude-code   # claude-code 쪽에서도 숨김")}
+}
+
+func sortedFirst(names []string) string {
+	s := append([]string(nil), names...)
+	sort.Strings(s)
+	return s[0]
 }
 
 // staleActivations: activations of projects whose directory no longer exists
@@ -81,6 +125,45 @@ func (e *env) staleActivations() []Check {
 		fmt.Sprintf("경로가 더 이상 없는 프로젝트 %d개에 프로필 활성화 %d건이 남아 있습니다: %s", len(paths), n, listNames(paths)),
 		"프로젝트 디렉터리가 삭제되었거나 이동되었습니다. 활성화는 아무 영향이 없지만 profile delete 를 막고 목록을 어지럽힙니다 (옮겼다면 새 위치에서 다시 활성화하세요)",
 		"forge profile prune-stale --dry-run   # 지울 목록(경로·마지막 활성화) 확인", "forge profile prune-stale --yes   # 실제로 정리 (프로필은 지우지 않음)")}
+}
+
+// duplicateProjects (TASK-0024 AC-11): several projects rows that are the same
+// directory (case variants written before FindProject folded them). Info only:
+// the rows are never merged automatically because each has its own activations
+// and project profiles.
+func (e *env) duplicateProjects() []Check {
+	groups, err := profile.DuplicateProjects(e.ctx, e.db)
+	if err != nil {
+		if isCtx(err) {
+			return nil
+		}
+		return []Check{unavailable("profile.projects.duplicate", "profile", "중복 프로젝트 행", err)}
+	}
+	if len(groups) == 0 {
+		return nil
+	}
+	var parts []string
+	for _, g := range groups {
+		var ps []string
+		for _, p := range g.Paths {
+			ps = append(ps, tailSafe(p, 100))
+		}
+		parts = append(parts, strings.Join(ps, " = "))
+	}
+	return []Check{mk("profile.projects.duplicate", "profile", "중복 프로젝트 행", Info,
+		fmt.Sprintf("같은 디렉터리를 가리키는 프로젝트 행이 %d묶음 있습니다: %s", len(groups), listNames(parts)),
+		"대소문자 변형 등으로 같은 디렉터리가 여러 철자로 기록되었습니다. 행마다 활성화와 프로젝트 프로필이 따로라 자동으로 합치지 않습니다. 조회는 입력한 철자와 정확히 같은 행을 먼저, 없으면 id 가 가장 작은 행을 씁니다 (FindProject)",
+		"forge profile list   # 프로젝트 프로필이 어느 행에 속하는지 확인", "forge profile current --client all --project-dir <경로>   # 적용되는 프로필 확인")}
+}
+
+// tailSafe is safe() that keeps the END of a long path (where two spellings of
+// one directory differ) and cuts the beginning.
+func tailSafe(p string, n int) string {
+	d := []rune(safe(p, 4000))
+	if len(d) <= n {
+		return string(d)
+	}
+	return "…" + string(d[len(d)-n:])
 }
 
 // idName makes a profile name safe as a check id segment: "." and "%" are

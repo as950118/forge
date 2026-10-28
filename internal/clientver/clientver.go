@@ -83,6 +83,10 @@ type Result struct {
 	// UnsafePath is the file or directory that made the location unsafe
 	// (Code == CodeUnsafeLoc); the binary was NOT run.
 	UnsafePath string `json:"unsafe_path,omitempty"`
+	// Inexact reports that Path/UnsafePath/Message show a path with visible
+	// escapes (control or invisible characters) or cut: pasting them into a
+	// shell names a different path (TASK-0024 AC-3).
+	Inexact bool `json:"inexact,omitempty"`
 }
 
 // RunResult is what a Runner returns: the capped output of "<bin> --version".
@@ -198,7 +202,11 @@ func (c *Checker) Check(ctx context.Context, spec Spec) Result {
 		r.Status, r.Code = StatusWarn, CodeUnsafeLoc
 		r.Path = textsafe.Display(loc.unsafe, 300)
 		r.UnsafePath = textsafe.Display(loc.unsafeOffender, 300)
+		r.Inexact = r.Path != loc.unsafe || r.UnsafePath != loc.unsafeOffender
 		r.Message = unsafeMessage(spec.Binary, loc.unsafe, loc.unsafeOffender, loc.unsafeReason)
+		if r.Inexact {
+			r.Message += " [경로의 제어·비가시 문자는 보이는 이스케이프로 표시했으므로 그대로 붙여 넣으면 실제 경로와 다릅니다]"
+		}
 		return r
 	}
 	if path == "" {
@@ -221,7 +229,7 @@ func (c *Checker) Check(ctx context.Context, spec Spec) Result {
 	out, err := run.RunVersion(ctx, resolved)
 	if err != nil {
 		r.Status, r.Code = StatusWarn, CodeRunFailed
-		r.Message = fmt.Sprintf("%s --version 을 실행하지 못했습니다: %s", spec.Binary, textsafe.Display(err.Error(), 160))
+		r.Message = fmt.Sprintf("%s --version 을 실행하지 못했습니다: %s%s", spec.Binary, textsafe.Display(err.Error(), 160), shimHint(spec.Binary, path, resolved))
 		return r
 	}
 	if out.TimedOut || out.Truncated || out.ExitCode != 0 {
@@ -232,7 +240,7 @@ func (c *Checker) Check(ctx context.Context, spec Spec) Result {
 		case out.Truncated:
 			r.Message = fmt.Sprintf("%s --version 출력이 %d바이트를 넘어 중단했습니다", spec.Binary, MaxOutput)
 		default:
-			r.Message = fmt.Sprintf("%s --version 이 종료 코드 %d 로 끝났습니다%s", spec.Binary, out.ExitCode, stderrHint(out.Stderr))
+			r.Message = fmt.Sprintf("%s --version 이 종료 코드 %d 로 끝났습니다%s%s", spec.Binary, out.ExitCode, stderrHint(out.Stderr), shimHint(spec.Binary, path, resolved))
 		}
 		return r
 	}
@@ -245,6 +253,23 @@ func (c *Checker) Check(ctx context.Context, spec Spec) Result {
 	r.Version = v
 	r.Status, r.Code, r.Message = Classify(v, spec.Verified)
 	return r
+}
+
+// versionManagerDirs are directory names of runtime/version managers whose shims
+// look up their runtime through the real HOME (TASK-0024 AC-7).
+var versionManagerDirs = []string{"/.nvm/", "/.asdf/", "/.volta/", "/.fnm/", "/.pyenv/", "/.rbenv/", "/.local/share/mise/", "/.local/share/fnm/", "/.proto/"}
+
+// shimHint explains a failed "--version" run: the binary runs with HOME and XDG_*
+// pointing to an empty temporary directory (isolation, docs/doctor.md), which
+// breaks shims that find their runtime through the real HOME. The hint says what
+// to do instead; it is specific when the path looks like a version manager.
+func shimHint(binary, path, resolved string) string {
+	for _, d := range versionManagerDirs {
+		if strings.Contains(path, d) || strings.Contains(resolved, d) {
+			return fmt.Sprintf(" [이 경로는 버전 관리자(nvm/asdf/volta 등)의 shim 으로 보입니다. Forge 는 HOME 을 임시 디렉터리로 바꿔 실행하므로 shim 이 런타임을 찾지 못해 실패했을 수 있습니다. 터미널에서 `%s --version` 으로 버전을 직접 확인하고, 문제가 없으면 sync 에 --allow-untested-version 을 쓰세요]", binary)
+		}
+	}
+	return fmt.Sprintf(" [Forge 는 HOME 을 임시 디렉터리로 바꿔 실행합니다. 실제 HOME 이 필요한 shim(nvm/asdf 류)이면 이 때문에 실패할 수 있으니 터미널에서 `%s --version` 으로 직접 확인하세요]", binary)
 }
 
 func stderrHint(b []byte) string {
@@ -273,10 +298,21 @@ func ParseVersion(b []byte) (string, bool) {
 			continue
 		}
 		if m := versionRe.FindStringSubmatch(ln); m != nil {
-			return m[1] + "." + m[2] + "." + m[3], true
+			return normNum(m[1]) + "." + normNum(m[2]) + "." + normNum(m[3]), true
 		}
 	}
 	return "", false
+}
+
+// normNum drops leading zeros of one version component ("0305" -> "305", "00"
+// -> "0") so "02.1.0305" is the same version as "2.1.305". The regexp allows at
+// most four digits, so no overflow is possible.
+func normNum(s string) string {
+	s = strings.TrimLeft(s, "0")
+	if s == "" {
+		return "0"
+	}
+	return s
 }
 
 // Classify compares a parsed version with the verified one: the exact version

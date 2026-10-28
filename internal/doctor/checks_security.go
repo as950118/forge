@@ -20,7 +20,7 @@ const securityGroup = "security"
 func checkSecurity(e *env) []Check {
 	conn, err := e.database()
 	if err != nil {
-		return []Check{mk("security.skipped", securityGroup, "보안", Info, "forge.db 를 읽을 수 없어 보안 점검을 건너뜁니다", "먼저 위 DB 점검의 해결 방법을 따르세요")}
+		return []Check{e.dbSkipped("security.skipped", securityGroup, "보안", "보안")}
 	}
 	_ = conn
 	var out []Check
