@@ -123,6 +123,7 @@ func profileCreateCmd() *cobra.Command {
 			fmt.Fprintf(out, "프로필 생성: %s (%s, 멤버 %d)\n", textsafe.Display(d.Name, 70), scopeLabel(d.Meta), d.Members)
 			if fromCurrent {
 				fmt.Fprintln(out, "현재 활성화된 스킬·도구·MCP 서버와 mcp.exposure.* 설정을 복사했습니다 (기존 설정은 그대로 둡니다).")
+				fmt.Fprintln(out, "이 프로필은 스냅샷입니다. 이후 레지스트리 변경은 자동으로 따라가지 않습니다: 새로 등록한 항목은 프로필에 없어 노출되지 않고(forge profile add 로 추가), 비활성화(disable)한 항목은 멤버여도 노출되지 않으며, 삭제(remove)한 항목은 프로필에서도 사라집니다.")
 			}
 			fmt.Fprintf(out, "다음: forge profile use %s --client all%s  (그다음 forge sync --target all)\n", d.Name, projectFlagHint(d.Meta))
 			return nil

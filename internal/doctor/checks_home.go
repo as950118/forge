@@ -79,7 +79,7 @@ func checkDatabase(e *env) []Check {
 			return append(out, mk("db.integrity", "home", "DB 무결성", Fail, "forge.db 에 레지스트리 테이블이 없습니다", "Forge DB 가 아니거나 손상되었습니다",
 				"ls "+e.q(home+"/backups")+"   # forge-v<N>-<시각>.db 백업이 있으면 forge.db 로 복원하세요"))
 		}
-		return append(out, mk("db.integrity", "home", "DB 무결성", Fail, "forge.db 를 읽을 수 없습니다: "+safe(err.Error(), 200), "파일이 손상되었거나 SQLite DB 가 아닙니다",
+		return append(out, mk("db.integrity", "home", "DB 무결성", Fail, safe(err.Error(), 200), "파일이 손상되었거나 SQLite DB 가 아닙니다",
 			"ls "+e.q(home+"/backups")+"   # forge-v<N>-<시각>.db 백업이 있으면 복원하세요"))
 	}
 

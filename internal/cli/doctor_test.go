@@ -181,7 +181,7 @@ func longDir(t *testing.T, base string, n int) string {
 	t.Helper()
 	d := base
 	for len(d) < n {
-		d = filepath.Join(d, strings.Repeat("d", min(60, n-len(d)-1)))
+		d = filepath.Join(d, strings.Repeat("d", max(1, min(60, n-len(d)-1)))) // max: a remaining gap of exactly 1 must still add a component (it looped forever for some TMPDIR lengths)
 	}
 	if err := os.MkdirAll(d, 0o755); err != nil {
 		t.Fatal(err)

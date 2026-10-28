@@ -35,8 +35,12 @@ func checkClients(e *env) []Check {
 			if up == "" {
 				up = r.Path
 			}
+			fix := []string{"ls -ld " + e.q(up), "chmod go-w " + e.q(up) + "   # 다른 사용자 쓰기 권한 제거(소유자가 본인이 아니면 신뢰할 수 있는 위치에 다시 설치)", "which -a " + spec.Binary}
+			if r.Inexact {
+				fix = append(fix[:2], inexactNote, fix[2])
+			}
 			out = append(out, mk(id, "client", title, Warn, r.Message, "그룹/다른 사용자가 수정할 수 있는 위치의 바이너리는 실행하지 않습니다 (다른 계정이 심은 실행 파일 방지). sync --apply 도 이 경우 중단되며 --allow-untested-version 으로 우회할 수 없습니다",
-				"ls -ld "+e.q(up), "chmod go-w "+e.q(up)+"   # 다른 사용자 쓰기 권한 제거(소유자가 본인이 아니면 신뢰할 수 있는 위치에 다시 설치)", "which -a "+spec.Binary))
+				fix...))
 		case clientver.CodeBlocked:
 			out = append(out, mk(id, "client", title, Warn, r.Message, "프로젝트 디렉터리 안의 바이너리는 실행하지 않습니다 (저장소가 심은 실행 파일 방지)", "which -a "+spec.Binary))
 		default: // run-failed, parse-failed
