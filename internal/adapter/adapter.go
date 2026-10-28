@@ -65,6 +65,11 @@ type Item struct {
 	// (a Forge-managed item that was edited by hand). User-owned content is
 	// never overridable.
 	Overridable bool `json:"-"`
+	// Tampered marks a skill conflict whose registry snapshot no longer matches
+	// its registered content hash (decided by the hash comparison, not by
+	// parsing Reason). It is neither a hand-edited managed item nor a name
+	// clash, and --force-managed does not help.
+	Tampered bool `json:"-"`
 }
 
 // OpKind is a low-level file operation.

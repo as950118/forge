@@ -271,7 +271,18 @@ func WriteTextAs(w io.Writer, p *Plan, res *ApplyResult, withDiff bool, mode str
 	}
 	fmt.Fprintf(w, "요약: %s\n", strings.Join(parts, " · "))
 	if r.Conflicts > 0 {
-		fmt.Fprintln(w, "충돌 항목은 사용자 소유이거나 손으로 수정된 항목이라 건드리지 않습니다.")
+		tampered := 0
+		for _, it := range r.Items {
+			if it.Action == ActionConflict && it.Tampered {
+				tampered++
+			}
+		}
+		if tampered < r.Conflicts {
+			fmt.Fprintln(w, "충돌 항목은 사용자 소유이거나 손으로 수정된 항목이라 건드리지 않습니다.")
+		}
+		if tampered > 0 {
+			fmt.Fprintln(w, "변조 의심 스킬 "+fmt.Sprint(tampered)+"건: "+TamperedSnapshotHelp)
+		}
 		if res == nil {
 			fmt.Fprintln(w, "--apply 는 충돌이 하나라도 있으면 아무것도 쓰지 않습니다. 충돌을 해소하거나 --skip-conflicts 로 충돌 항목만 제외하고 적용하세요.")
 		}

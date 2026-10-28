@@ -93,7 +93,11 @@ func writeDoctorText(w interface{ Write([]byte) (int, error) }, r *doctor.Report
 	for _, c := range r.Checks {
 		if c.Group != group {
 			group = c.Group
-			fmt.Fprintf(w, "\n== %s ==\n", groupLabel[group])
+			label, ok := groupLabel[group]
+			if !ok {
+				label = group
+			}
+			fmt.Fprintf(w, "\n== %s ==\n", label)
 		}
 		fmt.Fprintf(w, "%s %s: %s\n", sevMark[c.Status], c.Title, c.Message)
 		if c.Cause != "" && c.Status != doctor.OK {
@@ -114,5 +118,5 @@ func writeDoctorText(w interface{ Write([]byte) (int, error) }, r *doctor.Report
 
 var groupLabel = map[string]string{
 	"home": "홈·DB", "client": "클라이언트", "drift": "sync 드리프트", "paths": "경로·연결",
-	"history": "이력", "hygiene": "위생", "profile": "프로필",
+	"history": "이력", "hygiene": "위생", "profile": "프로필", "security": "보안",
 }

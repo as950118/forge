@@ -41,6 +41,7 @@ type Prepared struct {
 	RequestedRef string
 	Commit       string
 	Warnings     []string
+	approvedHash string // set by Restage: Registry.Add refuses a different tree
 	cleanup      func()
 }
 
@@ -50,6 +51,52 @@ func (p *Prepared) Cleanup() {
 		p.cleanup()
 		p.cleanup = nil
 	}
+}
+
+// Restage moves the staged tree into a new staging directory under tmpDir (same
+// file system as the registry, so the final rename works). approvedHash is the
+// tree hash the user saw in the preview and approved: the tree must still have
+// that hash before the copy and the copy must have it afterwards, otherwise
+// nothing is moved, the new staging is removed and an error is returned. It
+// lets a caller preview and get approval with the staging in the system temp
+// directory and only then touch FORGE_HOME. On success Registry.Add also
+// refuses a tree whose hash differs from approvedHash.
+func (p *Prepared) Restage(tmpDir, approvedHash string) error {
+	mismatch := fmt.Errorf("%w: 승인한 해시와 스테이징 내용이 다릅니다 (아무것도 설치하지 않았습니다)", ErrHashMismatch)
+	if approvedHash == "" {
+		return fmt.Errorf("승인한 해시가 없어 스테이징을 옮기지 않습니다")
+	}
+	if before, err := HashTree(p.Root); err != nil {
+		return err
+	} else if before != approvedHash {
+		return mismatch
+	}
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+		return err
+	}
+	stage, err := os.MkdirTemp(tmpDir, "import-*")
+	if err != nil {
+		return err
+	}
+	work := filepath.Join(stage, "work")
+	if err := CopyDir(p.Root, work, DefaultLimits); err != nil {
+		_ = RemoveAllForce(stage)
+		return fmt.Errorf("스테이징 이동 실패: %w", err)
+	}
+	if after, err := HashTree(work); err != nil || after != approvedHash {
+		_ = RemoveAllForce(stage)
+		return mismatch
+	}
+	old := p.cleanup
+	p.Root = work
+	p.approvedHash = approvedHash
+	p.cleanup = func() {
+		_ = RemoveAllForce(stage)
+		if old != nil {
+			old()
+		}
+	}
+	return nil
 }
 
 // Prepare stages src (local dir, .zip file, or https/ssh git URL), validates

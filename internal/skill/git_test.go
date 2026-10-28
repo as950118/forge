@@ -105,3 +105,23 @@ func TestValidateGitURLRejectsDashHost(t *testing.T) {
 		}
 	}
 }
+
+// TASK-0025 AC-2: an option-like user part is refused by Forge itself.
+func TestValidateGitURLRejectsDashUser(t *testing.T) {
+	for _, u := range []string{
+		"ssh://-oProxyCommand=x@h/r",
+		"ssh://-oProxyCommand=touch%20x@h/r",
+		"ssh://%2DoProxyCommand=x@h/r",
+		"ssh://-x@host.example.com/org/repo.git",
+	} {
+		err := ValidateGitURL(u)
+		if err == nil || !strings.Contains(err.Error(), "'-'") {
+			t.Errorf("%q: err=%v", u, err)
+		}
+	}
+	for _, u := range []string{"ssh://git@github.com/org/repo.git", "ssh://a-b@host/r", "ssh://host/r"} {
+		if err := ValidateGitURL(u); err != nil {
+			t.Errorf("%q must stay valid: %v", u, err)
+		}
+	}
+}

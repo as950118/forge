@@ -152,6 +152,18 @@ func (pl *Planner) skillBlocked(target string, pol SkillPolicy) string {
 	return ""
 }
 
+// TamperedSnapshotReason is the (short, table-friendly) conflict reason for a
+// skill whose registry snapshot does not match its registered content hash. It
+// names the real cause (not a hand edit of the client copy, not a name clash);
+// the sync report adds the full way out below the table (TamperedSnapshotHelp).
+func TamperedSnapshotReason(name string) string {
+	return "레지스트리 스냅샷 변조·손상(해시 불일치) — forge skill check " + name
+}
+
+// TamperedSnapshotHelp is the resolution text of a tampered registry snapshot.
+const TamperedSnapshotHelp = "변조·손상된 레지스트리 스냅샷은 sync 되지 않습니다(--force-managed 는 효과 없음). " +
+	"forge skill check <이름> 으로 확인하고, 변조가 맞으면 forge skill remove <이름> --yes 후 신뢰하는 소스에서 다시 추가하세요."
+
 func (pl *Planner) planSkill(s SkillInput, pol SkillPolicy) {
 	target := filepath.Join(pl.P.SkillsDir, s.Name)
 	it := Item{Kind: KindSkill, Name: s.Name, Path: target}
@@ -173,7 +185,8 @@ func (pl *Planner) planSkill(s SkillInput, pol SkillPolicy) {
 	}
 	wantHash, _, err := TreeHash(s.StoreDir, false)
 	if err != nil || (s.Hash != "" && wantHash != s.Hash) {
-		conflict("레지스트리 스냅샷을 검증할 수 없습니다 (손상 또는 변조: 내용 해시가 등록 값과 다름)", false)
+		it.Tampered = true
+		conflict(TamperedSnapshotReason(s.Name), false)
 		return
 	}
 	mk := marker{ManagedBy: "forge", Name: s.Name, Version: s.Version, TreeHash: wantHash}
