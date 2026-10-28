@@ -240,24 +240,26 @@ func skillAddCmd() *cobra.Command {
 			if previewOnly && yes {
 				return errors.New("--preview 와 --yes 는 함께 쓸 수 없습니다 (--preview 는 아무것도 설치하지 않습니다)")
 			}
-			var reg *skill.Registry
+			// Everything before the approval is side-effect free: the registry is
+			// opened read-only (a missing FORGE_HOME or database is not created)
+			// and the staging goes to the system temp directory. FORGE_HOME is
+			// created and written only after the install is approved.
 			opts := skill.PrepareOptions{Git: skillGit, Ref: ref}
-			if previewOnly {
-				r, closeFn, err := openRegistryRO()
-				if err != nil {
+			reg, closeFn, err := openRegistryRO()
+			if err != nil {
+				if previewOnly {
 					return err
 				}
-				defer closeFn()
-				reg = r
-			} else {
-				r, conn, err := openRegistry(ctx)
-				if err != nil {
-					return err
+				// Not readable read-only (e.g. an unflushed WAL): the read-write
+				// open of the previous behavior is the fallback for installs.
+				r, conn, oerr := openRegistry(ctx)
+				if oerr != nil {
+					return oerr
 				}
-				defer conn.Close()
-				reg = r
+				reg, closeFn = r, func() { _ = conn.Close() }
 				opts.TmpDir = homeTmp(reg.Home)
 			}
+			defer func() { closeFn() }()
 			p, err := skill.Prepare(ctx, args[0], opts)
 			if err != nil {
 				return err
@@ -298,6 +300,19 @@ func skillAddCmd() *cobra.Command {
 				prev := "forge skill add --preview " + shq(args[0])
 				if err := confirmInstall(cmd, yes, "위 미리보기를 확인했습니다. 이 스킬을 설치할까요?", prev); err != nil {
 					return refuse(err)
+				}
+			}
+			if opts.TmpDir == "" {
+				// Approved: only now create FORGE_HOME and the database.
+				closeFn()
+				r, conn, err := openRegistry(ctx)
+				if err != nil {
+					return err
+				}
+				closeFn = func() { _ = conn.Close() }
+				reg = r
+				if err := p.Restage(homeTmp(reg.Home), hash); err != nil {
+					return err
 				}
 			}
 			res, err := reg.Add(ctx, p)

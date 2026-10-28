@@ -238,3 +238,23 @@ func TestPreviewPinGuidancePerRunner(t *testing.T) {
 		}
 	}
 }
+
+// TASK-0025 AC-NEW (1): arguments that merely contain a dollar sign are not
+// ${...} references (no braces, or no closing brace) and must not warn.
+func TestNoEnvRefWarningForPlainDollarArguments(t *testing.T) {
+	for _, args := range [][]string{
+		{"$"}, {"cost=$"}, {"${"}, {"--x=${unterminated"}, {"$1"}, {"--n=$1"}, {"$HOME"}, {"--root=$HOME/work"}, {"$$"}, {"{env:"}, {"{file:/x"}, {"$(pwd)"}, {"{HOME}"},
+	} {
+		if i := ArgRefIndex("node", args); i != -1 {
+			t.Errorf("%q: ArgRefIndex=%d, want -1", args, i)
+		}
+		sp := Spec{Name: "n", Transport: TransportStdio, Command: "node", Args: args}
+		if w := argRefWarnings(BuildPreview(sp)); len(w) != 0 {
+			t.Errorf("%q: unexpected warning %v", args, w)
+		}
+	}
+	// a real reference after a lone dollar sign still warns, and points at the right argument
+	if i := ArgRefIndex("node", []string{"$", "$HOME", "${X}"}); i != 2 {
+		t.Errorf("index=%d, want 2", i)
+	}
+}

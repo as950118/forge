@@ -77,6 +77,9 @@ func (r *Registry) Add(ctx context.Context, p *Prepared) (res *AddResult, err er
 	if err != nil {
 		return nil, fmt.Errorf("해시 계산 실패: %w", err)
 	}
+	if p.approvedHash != "" && p.approvedHash != hash {
+		return nil, fmt.Errorf("%w: 승인한 해시와 설치할 내용이 다릅니다", ErrHashMismatch)
+	}
 	version := p.Meta.Version
 	if version == "" {
 		version = "h-" + hash[:12]

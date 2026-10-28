@@ -224,6 +224,7 @@ func (e *env) driftChecks(p *planned) []Check {
 	title := "sync 드리프트 " + p.target + "/" + string(p.scope)
 	var conflicts, links, pending, removals []string
 	var overridable, userOwned int
+	var tampered []string
 	for _, it := range p.plan.Items {
 		name := it.Kind + ":" + safe(it.Name, 60)
 		switch it.Action {
@@ -233,6 +234,10 @@ func (e *env) driftChecks(p *planned) []Check {
 				continue
 			}
 			conflicts = append(conflicts, name)
+			if it.Tampered {
+				tampered = append(tampered, safe(it.Name, 60))
+				continue
+			}
 			if it.Overridable {
 				overridable++
 			} else {
@@ -252,9 +257,21 @@ func (e *env) driftChecks(p *planned) []Check {
 			fix = append(fix, sync+" --apply --force-managed   # 직접 수정한 관리 항목만 덮어씀(백업됨)")
 		}
 		fix = append(fix, sync+" --apply --skip-conflicts   # 충돌 항목만 제외하고 적용")
-		cause := "Forge 가 관리하는 항목을 직접 수정했거나, 같은 이름의 사용자 항목이 이미 있습니다"
-		if userOwned > 0 {
-			cause += " (사용자 항목은 덮어쓰지 않습니다: 이름을 바꾸거나 직접 정리하세요)"
+		var cause string
+		if overridable+userOwned > 0 {
+			cause = "Forge 가 관리하는 항목을 직접 수정했거나, 같은 이름의 사용자 항목이 이미 있습니다"
+			if userOwned > 0 {
+				cause += " (사용자 항목은 덮어쓰지 않습니다: 이름을 바꾸거나 직접 정리하세요)"
+			}
+		}
+		if len(tampered) > 0 {
+			// Registry snapshot hash mismatch: a different cause with a different way out.
+			t := "레지스트리 스냅샷이 등록된 해시와 다른 스킬(" + listNames(tampered) + ")이 있습니다: 변조 또는 손상이며 --force-managed 로 해결되지 않습니다. 확인 forge skill check <이름>, 변조가 맞으면 forge skill remove <이름> --yes 후 신뢰하는 소스에서 다시 추가"
+			if cause != "" {
+				cause += ". "
+			}
+			cause += t
+			fix = append([]string{"forge skill check <이름>   # 변조·손상 확인(읽기 전용)"}, fix...)
 		}
 		out = append(out, mk(id, "drift", title, Warn, fmt.Sprintf("충돌 %d건: %s", len(conflicts), listNames(conflicts)), cause, fix...))
 	case len(pending)+len(removals) > 0:

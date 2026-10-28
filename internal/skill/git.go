@@ -41,6 +41,11 @@ func ValidateGitURL(raw string) error {
 		return fmt.Errorf("git URL 호스트가 '-' 로 시작할 수 없습니다 (옵션 주입 방지): %q", u.Host)
 	}
 	if u.User != nil {
+		// ssh://-oProxyCommand=...@host/r: git rejects it ("strange hostname"),
+		// but Forge refuses the option-like user part itself too.
+		if strings.HasPrefix(u.User.Username(), "-") || strings.HasPrefix(u.User.String(), "-") {
+			return fmt.Errorf("git URL 사용자 부분이 '-' 로 시작할 수 없습니다 (옵션 주입 방지)")
+		}
 		if _, hasPw := u.User.Password(); hasPw || (u.Scheme == "https" && u.User.Username() != "") {
 			return fmt.Errorf("자격증명이 포함된 URL 은 허용되지 않습니다 (source_uri 에 저장되면 안 됨)")
 		}
