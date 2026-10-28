@@ -140,7 +140,7 @@ func (pl *Planner) Preflight(dirs []string) {
 	}
 	pl.detectLostBackup(det)
 	for _, id := range det.Invalid {
-		pl.Note("백업 " + id + " 의 저널이 올바르지 않아(손상 또는 변조) 무시했습니다. 필요하면 forge sync --restore " + id + " 로 되돌리거나 --prune-backups 로 정리하세요")
+		pl.Note("백업 " + id + " 의 저널이 올바르지 않아(손상 또는 변조) 무시했습니다(경로를 정하는 환경변수 XDG_CONFIG_HOME 이 sync 때와 달라졌을 때도 이렇게 보입니다). 필요하면 forge sync --restore " + id + " 로 되돌리거나 --prune-backups 로 정리하세요")
 	}
 }
 
@@ -186,7 +186,7 @@ func (pl *Planner) detectLostBackup(det *Detection) {
 	pl.Note("중단된 이전 sync(백업 " + j.ID + ")의 저널 사본은 남아 있지만 그 백업 디렉터리가 삭제되어 이어서 완료하거나 되돌릴 수 없습니다. " +
 		"그 sync 가 만든 항목은 상태 파일에 기록이 없어 관리 항목으로 인정되지 않고 충돌로 표시됩니다(충돌 사유의 \"복사된 디렉터리\"·\"사용자가 정의\" 같은 설명은 이 경우 정확하지 않을 수 있음). " +
 		"--force-managed 는 상태 파일에 기록된 항목만 덮어쓰므로 이 충돌에는 효과가 없습니다. 안전한 해소: ① --skip-conflicts 로 충돌 항목만 제외하고 나머지를 적용하거나, " +
-		"② 해당 항목의 내용을 직접 확인한 뒤 지우거나 이름을 바꾸고 다시 sync 하세요. 다음 --apply 가 쓰기를 마치면 이 저널 사본은 정리됩니다")
+		"② 해당 항목의 내용을 직접 확인한 뒤 지우거나 이름을 바꾸고 다시 sync 하세요. 다음 --apply 가 쓰기를 마치면 이 저널 사본은 정리됩니다. 정리된 뒤 --skip-conflicts 로 제외한 항목은 다음 실행에서 \"복사된 디렉터리\"·\"사용자가 정의\" 같은 일반 문구의 충돌로 다시 나타납니다(같은 항목이며 해소 방법도 같습니다)")
 }
 
 // LostBackupReason is the conflict reason for an item the state file does not

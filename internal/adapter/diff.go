@@ -146,6 +146,7 @@ func splitLines(b []byte) []string {
 type diffOp struct {
 	kind byte // ' ', '-', '+'
 	text string
+	raw  string // text before display masking (non-JSON files; used to count hidden secret edits)
 }
 
 func unifiedDiff(path string, before, after []byte, hasBefore, hasAfter bool) (string, int) {
@@ -178,15 +179,25 @@ func unifiedDiff(path string, before, after []byte, hasBefore, hasAfter bool) (s
 	if isJSON {
 		hidden = hiddenSecretChanges(rawBefore, rawAfter, ops)
 	}
+	same := 0 // changed lines that stay in the diff but read the same on both sides
 	secretNote := func() {
-		if hidden > 0 {
-			fmt.Fprintf(&sb, "(비밀 값 변경: %d줄 — 값은 가려져 위 diff 에 나타나지 않습니다)\n", hidden)
+		if isJSON && hidden-same > 0 {
+			fmt.Fprintf(&sb, "(비밀 값 변경: %d줄 — 값은 가려져 위 diff 에 나타나지 않습니다)\n", hidden-same)
+		}
+		if same > 0 {
+			fmt.Fprintf(&sb, "(비밀 값 변경: %d줄 — 값이 가려져 변경 전후가 같게 보입니다)\n", same)
 		}
 	}
 	masker := newMasker(isJSON)
 	for i := range ops {
+		ops[i].raw = ops[i].text
 		ops[i].text = masker.line(ops[i].text)
 	}
+	// The changed lines stay in the diff but read the same on both sides: text
+	// files, and JSON files whose secret sits inside a string the key-based
+	// masking does not cover (`"command": "mysql -p<secret>"`, a URL userinfo).
+	same = maskedEqualChanges(ops)
+	hidden += same
 	// hunks
 	n := len(ops)
 	keep := make([]bool, n)
@@ -251,27 +262,56 @@ func unifiedDiff(path string, before, after []byte, hasBefore, hasAfter bool) (s
 	return sb.String(), hidden
 }
 
+// maskedEqualChanges counts, per run of changed lines, the removed lines that
+// have an added line reading the same after masking although the real text
+// differs: a secret value changed in a file that is not JSON (TASK-0027 AC-18).
+func maskedEqualChanges(ops []diffOp) int {
+	count := 0
+	for i := 0; i < len(ops); {
+		if ops[i].kind == ' ' {
+			i++
+			continue
+		}
+		j := i
+		for j < len(ops) && ops[j].kind != ' ' {
+			j++
+		}
+		used := map[int]bool{}
+		for a := i; a < j; a++ {
+			if ops[a].kind != '-' {
+				continue
+			}
+			for b := i; b < j; b++ {
+				if ops[b].kind == '+' && !used[b] && ops[b].text == ops[a].text && ops[b].raw != ops[a].raw {
+					used[b] = true
+					count++
+					break
+				}
+			}
+		}
+		i = j
+	}
+	return count
+}
+
 // hiddenSecretChanges counts the changed lines of the real (unmasked) diff that
 // the masked diff does not contain: lines that differ only in a secret value
 // become identical once masked and so vanish from the diff.
+//
+// Only the removed lines are counted: both diffs describe the same two files
+// (the masked copy has the same line count), so (removed - added) is the same in
+// both and the difference of the added lines would always equal the difference of
+// the removed ones (TASK-0027 AC-16: the former "maximum of both" was dead code).
 func hiddenSecretChanges(rawBefore, rawAfter []byte, maskedOps []diffOp) int {
-	count := func(ops []diffOp) (minus, plus int) {
+	count := func(ops []diffOp) (minus int) {
 		for _, o := range ops {
-			switch o.kind {
-			case '-':
+			if o.kind == '-' {
 				minus++
-			case '+':
-				plus++
 			}
 		}
 		return
 	}
-	rm, rp := count(diffLines(splitLines(rawBefore), splitLines(rawAfter)))
-	mm, mp := count(maskedOps)
-	h := rm - mm
-	if d := rp - mp; d > h {
-		h = d
-	}
+	h := count(diffLines(splitLines(rawBefore), splitLines(rawAfter))) - count(maskedOps)
 	if h < 0 {
 		return 0
 	}
@@ -291,15 +331,15 @@ func diffLines(a, b []string) []diffOp {
 	}
 	var out []diffOp
 	for _, l := range a[:pre] {
-		out = append(out, diffOp{' ', l})
+		out = append(out, diffOp{kind: ' ', text: l})
 	}
 	ma, mb := a[pre:len(a)-suf], b[pre:len(b)-suf]
 	if len(ma)*len(mb) > 4_000_000 {
 		for _, l := range ma {
-			out = append(out, diffOp{'-', l})
+			out = append(out, diffOp{kind: '-', text: l})
 		}
 		for _, l := range mb {
-			out = append(out, diffOp{'+', l})
+			out = append(out, diffOp{kind: '+', text: l})
 		}
 	} else {
 		w := len(mb) + 1
@@ -319,26 +359,26 @@ func diffLines(a, b []string) []diffOp {
 		for i < len(ma) && j < len(mb) {
 			switch {
 			case ma[i] == mb[j]:
-				out = append(out, diffOp{' ', ma[i]})
+				out = append(out, diffOp{kind: ' ', text: ma[i]})
 				i++
 				j++
 			case dp[(i+1)*w+j] >= dp[i*w+j+1]:
-				out = append(out, diffOp{'-', ma[i]})
+				out = append(out, diffOp{kind: '-', text: ma[i]})
 				i++
 			default:
-				out = append(out, diffOp{'+', mb[j]})
+				out = append(out, diffOp{kind: '+', text: mb[j]})
 				j++
 			}
 		}
 		for ; i < len(ma); i++ {
-			out = append(out, diffOp{'-', ma[i]})
+			out = append(out, diffOp{kind: '-', text: ma[i]})
 		}
 		for ; j < len(mb); j++ {
-			out = append(out, diffOp{'+', mb[j]})
+			out = append(out, diffOp{kind: '+', text: mb[j]})
 		}
 	}
 	for _, l := range a[len(a)-suf:] {
-		out = append(out, diffOp{' ', l})
+		out = append(out, diffOp{kind: ' ', text: l})
 	}
 	return out
 }
@@ -369,7 +409,10 @@ var benignDisplayKeys = map[string]bool{"author": true, "authors": true, "author
 // shortSecretWords are secret key/flag words too short for the substring rule of
 // mcp.LooksSecret: they only count as a whole word (`pwd`, `db_pw`, `rootPass`;
 // not `bypass`).
-var shortSecretWords = map[string]bool{"pw": true, "pwd": true, "pass": true, "passcode": true}
+//
+// "passphrase" and "pin" (TASK-0027 AC-18) are whole-word matches too: `passphrase`
+// has no PASSWORD/KEY substring, and `pin` must not hide `pinned` or `mapping`.
+var shortSecretWords = map[string]bool{"pw": true, "pwd": true, "pass": true, "passcode": true, "passphrase": true, "pin": true}
 
 func keyWords(s string) []string {
 	s = camelBoundary.ReplaceAllString(s, "$1-$2")
@@ -413,6 +456,44 @@ func secretFlag(s string) bool {
 	}
 	return false
 }
+
+// gluedShortFlagRe matches a short password flag with its value glued on
+// ("-pSECRET", mysql style), in an array element or inside a command string.
+// "-pthread" style compiler flags are the one ordinary word kept readable.
+// Display only: over-masking is preferred over a leak (as with "-p 22").
+var gluedShortFlagRe = regexp.MustCompile(`(^|\s)(-p)([^\s"'=-]\S*)`)
+
+// gluedKeep are ordinary words that follow a single dash "-p" (compiler and find
+// options); everything else glued to "-p" is treated as a password.
+var gluedKeep = map[string]bool{"-pthread": true, "-print": true, "-print0": true, "-perm": true, "-prune": true}
+
+func maskGluedShortFlag(s string) string {
+	return gluedShortFlagRe.ReplaceAllStringFunc(s, func(m string) string {
+		sm := gluedShortFlagRe.FindStringSubmatch(m)
+		if gluedKeep[sm[2]+sm[3]] {
+			return m
+		}
+		return sm[1] + sm[2] + maskedValue
+	})
+}
+
+// maskInlineDisplay is the inline credential masking of a displayed string:
+// the shared rules (ledger.MaskInline) plus the glued short flag.
+func maskInlineDisplay(s string) string {
+	return unprotectP(ledger.MaskInline(maskGluedShortFlag(protectP(s))))
+}
+
+// harmlessPCmd matches well-known commands whose "-p" is not a password
+// (`mkdir -p dir`, `cp -p a b`, `ls -p`, `install -p`): the flag is hidden from
+// the credential patterns for the duration of the masking. Any other command
+// (`mysql -p X`, an unknown tool) is still masked.
+var harmlessPCmd = regexp.MustCompile(`(^|[\s;&|"'(])((?:mkdir|cp|ls|install|touch|rsync|mv)\s+(?:-[A-Za-z]+\s+(?:[0-9][0-9A-Za-z]*\s+)?)*)-p(\s|$)`)
+
+const pGuard = "\x01"
+
+func protectP(s string) string { return harmlessPCmd.ReplaceAllString(s, "${1}${2}-"+pGuard+"p${3}") }
+
+func unprotectP(s string) string { return strings.ReplaceAll(s, pGuard, "") }
 
 // maskFlagValue masks the value of a one-string "--flag=value" argument whose flag
 // takes a secret ("--pwd=hunter2"); the references ${VAR}/{env:VAR} stay.
@@ -481,6 +562,11 @@ func MaskJSONDisplay(src string) string {
 						i = j + 1
 						continue
 					}
+					if g := maskGluedShortFlag(u); g != u && !strings.ContainsAny(u, " \t") {
+						out.WriteString(`"` + g + `"`)
+						i = j + 1
+						continue
+					}
 					top.maskNext = secretFlag(u)
 				}
 				if mask && (wholeRef.MatchString(content) || strings.ContainsAny(content, "\r\n")) {
@@ -531,6 +617,12 @@ func MaskJSONDisplay(src string) string {
 	return out.String()
 }
 
+// isFlagRef reports whether s is "--flag=${VAR}" / "--flag={env:VAR}".
+func isFlagRef(s string) bool {
+	name, val, ok := strings.Cut(s, "=")
+	return ok && plainFlagName.MatchString(name) && wholeRef.MatchString(val)
+}
+
 func flagEqMasked(s string) string {
 	r, _ := maskFlagValue(s)
 	return r
@@ -560,7 +652,7 @@ func MaskLine(s string) string { return newMasker(strings.Contains(s, `"`)).line
 
 func (m *masker) line(s string) string {
 	if !m.json {
-		return ledger.MaskText(s)
+		return unprotectP(ledger.MaskText(maskGluedShortFlag(protectP(s))))
 	}
 	if sm := kvLineRe.FindStringSubmatch(s); sm != nil {
 		key, val := sm[2], sm[3]
@@ -601,16 +693,21 @@ func (m *masker) line(s string) string {
 		switch {
 		case wholeRef.MatchString(inner) || hashRe.MatchString(inner): // sha256 digests are not secrets
 			b.WriteString(lit)
+		case isFlagRef(inner): // "--token=${VAR}": a reference, not a secret
+			b.WriteString(lit)
+		// A labelled identifier (commit hash) stays as it is, but the inline
+		// credential patterns still apply to it: `"url": "https://u:SECRET@h"`,
+		// `"command": "mysql -p SECRET"` (TASK-0027 AC-18).
 		case isValue && prev != "" && !mcp.LooksSecretKV(prev, inner):
-			b.WriteString(lit)
+			b.WriteString(`"` + maskInlineDisplay(inner) + `"`)
 		case !isValue && prev != "" && !mcp.LooksSecretAfter(prev, inner):
-			b.WriteString(lit)
+			b.WriteString(`"` + maskInlineDisplay(inner) + `"`)
 		case mcp.LooksSecretValue(inner):
 			b.WriteString(`"` + maskedValue + `"`)
 		case flagEqMasked(inner) != "":
 			b.WriteString(`"` + flagEqMasked(inner) + `"`)
 		default:
-			b.WriteString(`"` + ledger.MaskInline(inner) + `"`)
+			b.WriteString(`"` + maskInlineDisplay(inner) + `"`)
 		}
 		prev = inner
 	}

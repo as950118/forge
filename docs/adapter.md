@@ -126,6 +126,30 @@ TASK-0022 가 추가한 `TestShared*`/단위 시험의 변이 시험(각 변이�
 | `Preflight` 의 임시 디렉터리 심볼릭 링크 필터 제거 | 둘 다: `TestSharedPreflightIgnoresTempDirsBehindSymlinks` |
 | 스킬 제거 경로의 `WriteBlocker` 제거 | 둘 다: `TestSharedStaleSkillReadOnlyIsNotRemoved` |
 
+TASK-0027 AC-16 이 더한 시험의 변이 시험(저장소 복사본 rsync 위에서 변이 하나씩, 관련 시험만 실행). 모든 변이가 실패로 끝났고(아래 동치 제외) 결과는 다음과 같다:
+
+| 변이 | 실패한 테스트 |
+|---|---|
+| `secretFlag` 의 `-P` 대소문자(`EqualFold`) / `=` 건너뜀 제거 | `TestSecretFlagCaseEqualsAndWords`, `TestMaskJSONDisplayFlagArrayElements` |
+| `maskFlagValue` 의 `${VAR}` 면제 / 줄 마스커의 `--flag=${VAR}` 면제 제거 | `TestMaskJSONDisplayFlagArrayElements` |
+| `hiddenSecretChanges` 의 차감 제거, 호출 제거 | `TestHiddenSecretChangesWhenLinesAreAdded`, `TestDiffAnnouncesSecretOnlyChange` |
+| 텍스트 비밀 변경 요약(`maskedEqualChanges`) 제거 / "실제 텍스트가 다름" 조건 제거 | `TestDiffAnnouncesSecretOnlyChangeInText` / `TestDiffSecretCountIgnoresUnchangedLinesInFallbackMode` |
+| `passphrase`·`pin` 단어, 붙여 쓴 `-p` 규칙(배열 요소·텍스트), `-pthread` 예외, 평범한 키 아래 문자열의 인라인 마스킹 제거 | `TestDisplayMaskPassphrasePinGluedFlagCommandAndURL`, `TestGluedShortFlagMaskedInArrayElementAndInText`, `TestDisplayMaskKeepsOrdinaryValuesReadable`, `TestLineMaskerMasksInlineSecretInFirstLiteral` |
+| `IsManagedSkillDir` 의 마커 이름 / `managed_by` / 상위 링크 검사 제거 | `TestIsManagedSkillDir` |
+| `detectLostBackup` 의 status / root / scope / `validateJournal` / 백업 저널 존재 검사 제거 | `TestSharedLostBackupJournalCopyIsValidated` (하위 케이스 `emptied *` 가 root·scope 비교를 따로 잡는다) |
+| claude-code hook 의 `LostBackupReason` 제거 | `TestLostBackupExplainsTheHookConflict` |
+| `resumeInterruptedRestores` 의 `RestoreOf` 일치 / kind / target / scope / root / 옛 저널 판정 제거 | `TestResumeInterruptedRestoresMatchesOnlyThisRestore`, `TestSharedLegacyRestoreJournalIsClosedByTheFinishingRestore` |
+| `LoadDoc` 의 비심볼릭 오류 분기 제거 | `TestLoadDocUncheckablePathIsBlockedNotMislabelledAsLink` |
+| `validateJournal` 의 `restore_of` 검증(종류·형식 각각) 제거 | `TestSharedJournalRestoreOfIsValidated` |
+| `BuildReport` 의 `RestoreOf`·`ID` 정제 제거 | `TestBuildReportSanitizesInterruptedRestoreOf` |
+| 중단된 restore 에 "--apply 가 이어서 완료" 문구를 내거나 restore 안내 제거 | `TestInterruptedRestoreDoesNotPromiseApplyResumesIt` |
+| 표 아래 전체 이유 줄 / 참고·이유 길이 한도 복원(300바이트) 제거 | `TestPlanTableShowsLongReasonsInFull`, `TestSharedLongNotesAreNotCutInTheReport` |
+| 스냅샷 하드링크 전용 사유 제거 | `TestSharedHardLinkedRegistrySnapshotHasItsOwnReason` |
+| opencode `AllowedPath` 의 XDG 안내 제거 | `TestRestoreAfterXDGConfigHomeChangedSaysHowToRecover` |
+| 저널 사본 정리 뒤 일반 문구 안내 제거 | `TestSharedLostBackupNoteWarnsAboutGenericWordingAfterSkip` |
+
+TASK-0027 에서 확인한 **동치 변이**(관측할 수 있는 동작이 같아 시험으로 잡을 수 없음, 계층 방어로 남김): (1) `hiddenSecretChanges` 의 "추가 줄 최댓값": 두 diff 는 같은 두 파일을 다루므로 `제거 줄 수 - 추가 줄 수` 가 같아 `추가 줄 차이` 는 항상 `제거 줄 차이` 와 같다. 죽은 분기였으므로 코드에서 삭제했다. (2) `detectLostBackup` 의 `det.Infos`·`det.Invalid` 반복: 뒤의 `loadJournal` 성공 검사가 같은 경우를 먼저 걸러낸다. (3) `detectLostBackup` 의 `j.Target` 비교·`validateJournalIdentity`·`GuardPath`·`CheckNoSymlinks`: 바로 이어지는 `validateJournal`·`ReadFileSafe` 가 같은 조건을 거부한다(저널 사본 자체가 링크인 경우 `ReadFileSafe` 가 거부하며, 상위 디렉터리가 링크이면 계획이 더 뒤에서 상태 파일 검사로 실패해 `LostBackups` 를 관측할 수 없다). (4) `IsManagedSkillDir` 의 마지막 구성요소 `Lstat` 링크 검사: 바로 뒤의 `EvalSymlinks` 동일성 검사가 같은 경우(와 상위 링크)를 거부한다.
+
 잡을 수 없는 변이(동치): (1) `LoadState` 의 `GuardPath` 제거 — 바로 다음 `ReadFileSafe` 가 같은 가드로 같은 오류를 낸다. (2) `RenderServer` 의 비밀 literal 휴리스틱 제거 — 앞선 `Spec.Validate` 가 같은 조건(`IsSecret`·`LooksSecret`·`LooksSecretKV`)을 먼저 거부해 도달하지 못하는 두 번째 방어선이다. 둘 다 계층 방어로 남겼다. 한 타깃에만 의미가 있는 변이: 명령·인자·URL 치환 문법 검사(`SubstInCommand`)는 opencode 만 켠다(Claude Code 는 `${VAR}` 를 명령·인자에서도 확장하는 정상 기능이라 켜지 않음; opencode 테스트가 잡음), 다른 타깃 상태 파일 읽기 가드(`ReadForeignState`)는 opencode 만 쓴다(`TestOpenCodeForeignStateIsGuarded`).
 
 ## 엔진이 제공하는 것 (`internal/adapter`)

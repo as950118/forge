@@ -20,6 +20,7 @@ package opencode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,7 +143,22 @@ func userSkillsDir(root string) (dir, note string) {
 // are writable; the OpenCode secret/user-level files are refused by GuardPath.
 func (a *Adapter) AllowedPath(scope adapter.Scope, root, path string) (string, error) {
 	p := a.paths(scope, root)
-	return adapter.AllowedPath(Name, scope, root, path, p.Paths, map[string]string{p.configJSON: root})
+	base, err := adapter.AllowedPath(Name, scope, root, path, p.Paths, map[string]string{p.configJSON: root})
+	if err != nil && scope == adapter.ScopeUser && looksLikeUserSkillPath(path) {
+		// A backup or journal made when XDG_CONFIG_HOME pointed elsewhere (or was
+		// unset) names a skills directory this run does not use (TASK-0027 AC-12).
+		err = fmt.Errorf("%w. XDG_CONFIG_HOME 이 sync 했을 때와 달라졌다면 그때 값으로 되돌리고 다시 실행하세요 (이번 실행의 user 스킬 대상: %s). "+
+			"XDG_CONFIG_HOME 이 홈 디렉터리 밖(절대 경로여도)이거나 링크이면 항상 무시되고 ~/.config/opencode/skills 가 쓰이므로, 그 위치에 만든 백업은 이 도구로 복원할 수 없습니다 (docs/sync.md)",
+			err, textsafe.Display(p.SkillsDir, 200))
+	}
+	return base, err
+}
+
+// looksLikeUserSkillPath reports whether path has the shape of an OpenCode user
+// skill directory: <config dir>/opencode/skills/<name>.
+func looksLikeUserSkillPath(path string) bool {
+	d := filepath.Dir(path)
+	return adapter.SkillNameRe.MatchString(filepath.Base(path)) && filepath.Base(d) == "skills" && filepath.Base(filepath.Dir(d)) == "opencode"
 }
 
 // ResolveRoot resolves the sync root (the CLI needs it to name the sync lock

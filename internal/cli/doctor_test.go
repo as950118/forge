@@ -530,9 +530,17 @@ func TestDoctorInterruptedSyncAndBackupDependency(t *testing.T) {
 	}
 	r := e.mustDoctor(t)
 	c := e.expect(t, r, "drift.claude-code.project.backup", "warn")
-	if !strings.Contains(c.Message, "20260101T000000.000Z-abcdef") || !strings.Contains(c.Cause, "백업") || !hasFix(c, "--force-managed") || !hasFix(c, "--skip-conflicts") || !hasFix(c, "rm "+jp) {
+	if !strings.Contains(c.Message, "20260101T000000.000Z-abcdef") || !strings.Contains(c.Cause, "백업") || hasFix(c, "--apply --force-managed") || !strings.Contains(c.Cause, "효과가 없습니다") || !hasFix(c, "--skip-conflicts") || !hasFix(c, "rm "+jp) {
+		// TASK-0027 AC-8: --force-managed no longer advised (it cannot adopt the items of a
+		// lost backup: planner.LostBackupReason); the cause says so.
 		t.Fatalf("%+v", c)
 	}
+	// a journal copy that is not pending (finished/rolled back) needs no backup
+	_ = os.WriteFile(jp, []byte(`{"version":1,"id":"20260101T000000.000Z-abcdef","status":"complete"}`), 0o644)
+	if c := e.mustDoctor(t).get("drift.claude-code.project.backup"); c != nil {
+		t.Fatalf("a completed journal copy was reported: %+v", c)
+	}
+	_ = os.WriteFile(jp, []byte(j), 0o644)
 	// an unreadable copy
 	_ = os.WriteFile(jp, []byte(`{"id":"../../etc/passwd"}`), 0o644)
 	if c := e.expect(t, e.mustDoctor(t), "drift.claude-code.project.backup", "warn"); !strings.Contains(c.Message, "해석할 수 없습니다") {
