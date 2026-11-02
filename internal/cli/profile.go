@@ -90,7 +90,7 @@ func profileCmd() *cobra.Command {
 자세한 내용은 docs/profile.md.`,
 	}
 	cmd.AddCommand(profileCreateCmd(), profileListCmd(), profileShowCmd(), profileDeleteCmd(),
-		profileAddCmd(), profileRemoveCmd(), profileUseCmd(), profileUnuseCmd(), profileCurrentCmd(), profilePruneStaleCmd())
+		profileAddCmd(), profileRemoveCmd(), profileUseCmd(), profileUnuseCmd(), profileCurrentCmd(), profilePruneStaleCmd(), profileMergeProjectsCmd())
 	return cmd
 }
 
@@ -772,4 +772,80 @@ func warnProfileMembers(cmd *cobra.Command, db profile.Querier, kind, name strin
 		parts = append(parts, s)
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "다음 프로필에서 제외됩니다: %s\n", strings.Join(parts, ", "))
+}
+
+func profileMergeProjectsCmd() *cobra.Command {
+	var yes, asJSON bool
+	cmd := &cobra.Command{
+		Use:   "merge-projects <from> <to> [--yes] [--json]",
+		Short: "Merge two projects rows that are the same directory (dry-run unless --yes)",
+		Long: `같은 디렉터리가 다른 철자(대소문자 등)로 두 번 기록된 projects 행을 하나로 합칩니다(forge doctor 의 "중복 프로젝트 행" 안내).
+<from> 행의 활성화·프로젝트 프로필·프로젝트 범위 스킬/도구/MCP 서버를 <to> 행으로 옮기고 <from> 행을 지웁니다.
+기본은 무엇을 옮길지만 보여 주는 dry-run 이며, --yes 를 줄 때만 한 트랜잭션으로 실행합니다.
+
+  forge profile merge-projects /x/PROJ /x/proj          # dry-run
+  forge profile merge-projects /x/PROJ /x/proj --yes
+
+<from>, <to> 는 doctor 가 보여 준 철자 그대로(projects 에 저장된 경로 문자열)입니다. 두 경로가 모두 존재하고 같은 디렉터리여야 합니다.
+충돌이 있으면 아무것도 바꾸지 않고 중단합니다: 같은 클라이언트에 서로 다른 프로필이 활성화되어 있거나, 같은 이름의 프로젝트 프로필·스킬·도구·MCP 서버가
+양쪽에 있는 경우. (같은 프로필을 같은 클라이언트에 활성화한 것은 충돌이 아니며 <from> 쪽이 버려집니다.)
+이력(ledger/sessions)의 project 문자열은 기록 당시 철자로 남습니다. 되돌리려면 병합 전 forge.db 사본이 필요하니 필요하면 먼저 복사해 두세요.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var plan *profile.MergePlan
+			if yes {
+				ps, closeFn, err := openProfileStore(cmd)
+				if err != nil {
+					return err
+				}
+				defer closeFn()
+				if plan, err = ps.MergeProjects(cmd.Context(), args[0], args[1]); err != nil {
+					return err
+				}
+			} else {
+				rd, err := openReadOnlyRegistry(cmd)
+				if err != nil {
+					return err
+				}
+				defer rd.close()
+				if plan, err = profile.PlanMerge(cmd.Context(), rd, args[0], args[1]); err != nil {
+					return err
+				}
+			}
+			out := cmd.OutOrStdout()
+			if asJSON {
+				return writeJSON(out, map[string]any{"schema": 1, "dry_run": !yes, "applied": yes && plan.OK(), "from": plan.From, "to": plan.To, "plan": plan})
+			}
+			list := func(label string, v []string) {
+				if len(v) > 0 {
+					fmt.Fprintf(out, "  %s %d: %s\n", label, len(v), textsafe.Display(strings.Join(v, ", "), 300))
+				}
+			}
+			fmt.Fprintf(out, "합치기: %s  ->  %s (유지)\n", textsafe.Display(plan.From, 300), textsafe.Display(plan.To, 300))
+			list("옮길 프로젝트 프로필", plan.Profiles)
+			list("옮길 스킬", plan.Skills)
+			list("옮길 도구", plan.Tools)
+			list("옮길 MCP 서버", plan.MCP)
+			list("옮길 활성화", plan.Moved)
+			list("버릴 중복 활성화", plan.Dropped)
+			if plan.NotSameDir != "" {
+				return fmt.Errorf("합칠 수 없습니다: %s", plan.NotSameDir)
+			}
+			if len(plan.Conflicts) > 0 {
+				for _, c := range plan.Conflicts {
+					fmt.Fprintf(out, "  충돌: %s\n", textsafe.Display(c, 300))
+				}
+				return errors.New("충돌이 있어 아무것도 바꾸지 않았습니다 (위 충돌을 해결한 뒤 다시 실행하세요)")
+			}
+			if yes {
+				fmt.Fprintln(out, "합쳤습니다: <from> 행을 지웠습니다. 설정 파일은 아직 바뀌지 않았습니다. 반영: forge sync --target all --apply")
+			} else {
+				fmt.Fprintf(out, "dry-run: 아무것도 바꾸지 않았습니다. 실행하려면: forge profile merge-projects %s %s --yes\n", shellQuote(plan.From), shellQuote(plan.To))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&yes, "yes", false, "실제로 합침 (기본은 dry-run)")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON 출력")
+	return cmd
 }

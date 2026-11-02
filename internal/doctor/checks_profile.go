@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,12 +56,100 @@ func checkProfile(e *env) []Check {
 		out = append(out, e.legacyIgnored(c)...)
 	}
 	for _, r := range actives {
-		out = append(out, e.profileHealth(r, clients)...)
+		// The per-profile claude-code/opencode skill overlap only makes sense for a profile
+		// that applies to BOTH clients; with different profiles per client the same
+		// skills are reported once, by crossProfileOverlap (TASK-0032 AC-5).
+		both := byClient["claude-code"] != nil && byClient["opencode"] != nil &&
+			byClient["claude-code"].Profile.ID == r.Profile.ID && byClient["opencode"].Profile.ID == r.Profile.ID
+		out = append(out, e.profileHealth(r, clients, both)...)
 	}
 	out = append(out, e.crossProfileOverlap(byClient)...)
 	out = append(out, e.duplicateProjects()...)
 	out = append(out, e.staleActivations()...)
+	out = append(out, e.recentDeletions()...)
 	return out
+}
+
+// deletionWindow is how far back recentDeletions looks.
+const deletionWindow = 14 * 24 * time.Hour
+
+// recentDeletions (TASK-0032 AC-1): a skill, tool or MCP server that was removed
+// from the registry took its profile memberships with it (ON DELETE CASCADE). The
+// migration-0005 trigger recorded what each deletion removed from which profile;
+// this reports the recent ones. Warn when an affected profile still exists (it
+// silently shrank), info when the profile is gone too. A database without the audit
+// table (before 0005) has nothing to report.
+func (e *env) recentDeletions() []Check {
+	var has int
+	if err := e.db.QueryRowContext(e.ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='registry_deletions'`).Scan(&has); err != nil || has == 0 {
+		return nil
+	}
+	since := e.now.Add(-deletionWindow).UnixMilli()
+	rows, err := e.db.QueryContext(e.ctx, `SELECT kind, name, members, deleted_at FROM registry_deletions
+		WHERE deleted_at >= ? AND members <> '[]' ORDER BY deleted_at DESC LIMIT 200`, since)
+	if err != nil {
+		if isCtx(err) {
+			return nil
+		}
+		return []Check{unavailable("profile.deleted", "profile", "삭제된 프로필 멤버", err)}
+	}
+	type delRow struct {
+		kind, name, members string
+		at                  int64
+	}
+	var dels []delRow
+	for rows.Next() { // the handle has one connection: read everything before the next query
+		var d delRow
+		if rows.Scan(&d.kind, &d.name, &d.members, &d.at) == nil {
+			dels = append(dels, d)
+		}
+	}
+	_ = rows.Close()
+	existing := map[string]bool{}
+	if pr, err := e.db.QueryContext(e.ctx, `SELECT scope || ':' || name FROM profiles`); err == nil {
+		for pr.Next() {
+			var l string
+			if pr.Scan(&l) == nil {
+				existing[l] = true
+			}
+		}
+		_ = pr.Close()
+	}
+	var items []string
+	shrunk := false
+	var firstProfile string
+	for _, d := range dels {
+		kind, name, at := d.kind, d.name, d.at
+		var labels []string
+		if json.Unmarshal([]byte(d.members), &labels) != nil || len(labels) == 0 {
+			continue
+		}
+		var shown []string
+		for _, l := range labels {
+			shown = append(shown, safe(l, 70))
+			if existing[l] {
+				shrunk = true
+				if firstProfile == "" {
+					firstProfile = strings.TrimPrefix(strings.TrimPrefix(l, "global:"), "project:")
+				}
+			}
+		}
+		items = append(items, fmt.Sprintf("%s:%s (%s 삭제, 프로필 %s)", kind, safe(name, 50), time.UnixMilli(at).UTC().Format("2006-01-02"), strings.Join(shown, ", ")))
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	st, cause := Info, "해당 프로필은 이미 없어졌습니다 (참고용 기록)"
+	if shrunk {
+		st, cause = Warn, "프로필 멤버십은 레지스트리 항목과 함께 사라집니다(조용한 CASCADE). 같은 이름으로 다시 등록해도 멤버는 자동으로 돌아오지 않으므로 프로필에 다시 추가해야 합니다. 삭제한 적이 없다면 누가 지웠는지 확인하세요"
+	}
+	fix := []string{"forge profile list   # 프로필 목록과 멤버 수 확인"}
+	if firstProfile != "" {
+		fix = append(fix, "forge profile show "+adapter.ShellQuote(firstProfile)+"   # 지금 남은 멤버 확인",
+			"forge profile add "+adapter.ShellQuote(firstProfile)+" --skill|--tool|--mcp <이름>   # 다시 등록한 항목을 프로필에 추가")
+	}
+	return []Check{mk("profile.deleted", "profile", "삭제로 사라진 프로필 멤버", st,
+		fmt.Sprintf("최근 %d일 안에 레지스트리 삭제로 프로필 멤버가 사라졌습니다 (%d건): %s", int(deletionWindow.Hours()/24), len(items), listNames(items)), cause, fix...)}
 }
 
 // crossProfileOverlap (TASK-0024 AC-6): claude-code and opencode apply DIFFERENT
@@ -73,9 +162,10 @@ func (e *env) crossProfileOverlap(byClient map[string]*profile.Resolved) []Check
 	if cc == nil || oc == nil || cc.Profile.ID == oc.Profile.ID {
 		return nil
 	}
+	disabled := e.disabledSkills() // a disabled skill is not rendered, so OpenCode cannot see it
 	var names []string
 	for n, ex := range cc.Skills {
-		if ex != profile.ExposureDirect {
+		if ex != profile.ExposureDirect || disabled[n] {
 			continue
 		}
 		if oc.Skills[n] != profile.ExposureDirect {
@@ -94,6 +184,23 @@ func (e *env) crossProfileOverlap(byClient map[string]*profile.Resolved) []Check
 		"OpenCode 는 .claude/skills 도 읽으므로 claude-code 에 렌더링된 스킬은 opencode 프로필이 숨기거나 빼도 OpenCode 에 보입니다 (opencode 에서만 숨길 수 없음). 다른 프로필을 클라이언트별로 쓸 때의 한계입니다",
 		"forge profile current --client all   # 클라이언트별 적용 프로필 확인",
 		"forge profile add "+adapter.ShellQuote(cc.Profile.Name)+pflag+" --skill "+adapter.ShellQuote(sortedFirst(names))+" --exposure hidden --client claude-code   # claude-code 쪽에서도 숨김")}
+}
+
+// disabledSkills returns the names of registered skills whose enabled flag is off.
+func (e *env) disabledSkills() map[string]bool {
+	out := map[string]bool{}
+	rows, err := e.db.QueryContext(e.ctx, `SELECT name FROM skills WHERE enabled = 0`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n string
+		if rows.Scan(&n) == nil {
+			out[n] = true
+		}
+	}
+	return out
 }
 
 func sortedFirst(names []string) string {
@@ -152,8 +259,9 @@ func (e *env) duplicateProjects() []Check {
 	}
 	return []Check{mk("profile.projects.duplicate", "profile", "중복 프로젝트 행", Info,
 		fmt.Sprintf("같은 디렉터리를 가리키는 프로젝트 행이 %d묶음 있습니다: %s", len(groups), listNames(parts)),
-		"대소문자 변형 등으로 같은 디렉터리가 여러 철자로 기록되었습니다. 행마다 활성화와 프로젝트 프로필이 따로라 자동으로 합치지 않습니다. 조회는 입력한 철자와 정확히 같은 행을 먼저, 없으면 id 가 가장 작은 행을 씁니다 (FindProject)",
-		"forge profile list   # 프로젝트 프로필이 어느 행에 속하는지 확인", "forge profile current --client all --project-dir <경로>   # 적용되는 프로필 확인")}
+		"대소문자 변형 등으로 같은 디렉터리가 여러 철자로 기록되었습니다. 행마다 활성화와 프로젝트 프로필이 따로라 자동으로 합치지 않습니다(forge profile merge-projects 로 직접 합칠 수 있습니다). 조회는 입력한 철자와 정확히 같은 행을 먼저, 없으면 id 가 가장 작은 행을 씁니다 (FindProject)",
+		"forge profile list   # 프로젝트 프로필이 어느 행에 속하는지 확인", "forge profile current --client all --project-dir <경로>   # 적용되는 프로필 확인",
+		"forge profile merge-projects "+e.q(groups[0].Paths[1])+" "+e.q(groups[0].Paths[0])+"   # 합치기 미리보기(dry-run: 충돌이 있으면 중단). 실제 병합은 --yes")}
 }
 
 // tailSafe is safe() that keeps the END of a long path (where two spellings of
@@ -183,7 +291,7 @@ func (e *env) legacyIgnored(client string) []Check {
 		"프로필이 노출의 정식 저장소입니다 (--from-current 로 만들었다면 이미 복사되어 있습니다)", "forge profile show <이름>   # 프로필의 노출 확인")}
 }
 
-func (e *env) profileHealth(r *profile.Resolved, clients []string) []Check {
+func (e *env) profileHealth(r *profile.Resolved, clients []string, appliesToBoth bool) []Check {
 	d, err := profile.GetDetail(e.ctx, e.db, r.Profile.ID)
 	if err != nil {
 		return []Check{unavailable("profile.health", "profile", "프로필 "+safe(r.Profile.Name, 40), err)}
@@ -230,7 +338,9 @@ func (e *env) profileHealth(r *profile.Resolved, clients []string) []Check {
 			"enabled 플래그가 프로필 멤버십보다 우선합니다", disabledFix(d.Name, pflag, disabledBy)...))
 	}
 	out = append(out, e.pinHealth(d, id, title, pflag)...)
-	out = append(out, e.claudeOpenCodeOverlap(d, id, title, pflag)...)
+	if appliesToBoth {
+		out = append(out, e.claudeOpenCodeOverlap(d, id, title, pflag)...)
+	}
 	return out
 }
 
@@ -342,7 +452,7 @@ func (e *env) pinHealth(d *profile.Detail, id, title, pflag string) []Check {
 func (e *env) claudeOpenCodeOverlap(d *profile.Detail, id, title, pflag string) []Check {
 	var names []string
 	for _, m := range d.MemberList {
-		if m.Kind != profile.KindSkill || m.Broken != "" {
+		if m.Kind != profile.KindSkill || m.Broken != "" || !m.Enabled {
 			continue
 		}
 		if m.ExposureFor("claude-code") == profile.ExposureDirect && m.ExposureFor("opencode") != profile.ExposureDirect {

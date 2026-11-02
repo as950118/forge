@@ -34,6 +34,8 @@ const VersionArg = "--version"
 //     removed afterwards. The cost: a shim that needs the real HOME to find its
 //     runtime (nvm/asdf style wrappers) fails, which is reported as "run-failed"
 //     (warn), not as a verified version.
+//   - the directory is named forge-ver-<pid>-<random>; a later run removes the ones
+//     of dead processes under strict conditions (stale.go).
 //   - 5 second timeout, 4 KiB cap per stream (the process is stopped when it
 //     talks more), the whole process group is killed afterwards.
 type Exec struct{}
@@ -43,7 +45,8 @@ func (Exec) RunVersion(ctx context.Context, path string) (RunResult, error) {
 	if !filepath.IsAbs(path) {
 		return RunResult{}, errors.New("실행 경로가 절대 경로가 아닙니다")
 	}
-	tmp, err := os.MkdirTemp("", "forge-ver-")
+	sweepStaleOnce() // directories of killed runs (stale.go)
+	tmp, err := os.MkdirTemp("", tempPattern())
 	if err != nil {
 		return RunResult{}, err
 	}

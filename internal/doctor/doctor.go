@@ -141,6 +141,11 @@ func (e *env) noteInexact(c *Check) {
 		return
 	}
 	for _, f := range c.Fix {
+		if f == inexactNote {
+			return // already added by the check itself (checks_clients.go)
+		}
+	}
+	for _, f := range c.Fix {
 		for q := range e.inexact {
 			if strings.Contains(f, q) {
 				if len(c.Fix) >= maxFixes {

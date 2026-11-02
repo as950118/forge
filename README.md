@@ -27,9 +27,9 @@ Forge는 이를 한곳에서 등록·관리하고, 각 CLI가 읽는 형태로 �
 | **스킬** `forge skill` | `add` `update` `check` `list` `show` `remove` `enable` `disable` `validate` `misses` | [agentskills.io](https://agentskills.io) 규격 `SKILL.md` 가져오기(디렉터리·zip·git), 설치 전 미리보기(`--preview`), git/zip 승인 정책, `--sha256`·`--ref` 고정, 변조 탐지(`check`), 불변 버전, 활성화/비활성화 |
 | **MCP** `forge mcp` | `add` `list` `show` `remove` `refresh` `approve` `pin` `enable` `disable` `expose` `serve` | stdio/http/sse 서버 등록(비밀은 `${ENV}` 참조만), `tools/list` 발견·캐시, 도구 정의 승인과 고정(`approve`, `pin --enforce`), 클라이언트별 노출(`expose`), **게이트웨이**(`serve`) |
 | **도구** `forge tool` | `add` `list` `show` `remove` `enable` `disable` `test` | command/script/http 커스텀 도구(JSON 스키마, 셸 없는 argv 실행, 실행 정책·`confirm`), 게이트웨이로 노출 |
-| **프로필** `forge profile` | `create` `add` `remove` `show` `list` `use` `unuse` `current` `delete` `prune-stale` | 클라이언트·프로젝트별 노출 허용 목록 묶음, 스킬 버전 고정 |
+| **프로필** `forge profile` | `create` `add` `remove` `show` `list` `use` `unuse` `current` `delete` `prune-stale` `merge-projects` | 클라이언트·프로젝트별 노출 허용 목록 묶음, 스킬 버전 고정 |
 | **동기화** `forge sync` | (플래그) `--target claude-code\|opencode\|all` `--dry-run` `--diff` `--apply` `--restore` `--list-backups` `--prune-backups` 등 | 레지스트리를 Claude Code(`.claude/skills`, `.mcp.json`, hook)와 OpenCode(`.opencode/skills`, `opencode.json` 의 `mcp`) 설정으로 렌더링. 기본은 계획만, 쓰기 전 백업, 사용자 항목 보존, 충돌 시 중단, 버전 게이팅 |
-| **이력** `forge history` | (목록) `summary` `top` `unused` `misses` (+ `forge skill misses`) | 호출 원장 조회·집계, 기간·종류·클라이언트 필터, table/json/csv, 없어서 못 쓴 스킬(miss) |
+| **이력** `forge history` | (목록) `summary` `top` `unused` `misses` `prune` (+ `forge skill misses`) | 호출 원장 조회·집계, 기간·종류·클라이언트 필터, table/json/csv, 없어서 못 쓴 스킬(miss), 오래된 기록 삭제(`prune`, 기본 dry-run) |
 | **점검** `forge doctor` | (플래그) `--scope` `--project-dir` `--json` `--strict` | 읽기 전용 상태 점검, 원인과 해결 명령 안내, 보안 점검(스킬 변조·MCP 도구 정의 변경) |
 | **hook** `forge hook` | `ingest` `snippet` | Claude Code hook 이벤트 기록(항상 종료 코드 0), `settings.json` 스니펫 출력 |
 
@@ -150,7 +150,7 @@ make demo
 - 커스텀 도구의 deny 목록은 심층 방어일 뿐 샌드박스가 아니며, 코드 실행형 바이너리(`sqlite3`, `npm exec` 등)를 자동 분류하지 않습니다. 스킬 미리보기의 위험 패턴은 단순 휴리스틱입니다.
 - 스킬 트리 **안의** 하드링크 검사는 아직 없습니다. 승인과 해시 고정은 "내가 본 내용과 같다" 는 것만 보장합니다.
 - 비밀 탐지는 휴리스틱입니다. 파일 경로 인자와 `--ref`·`commit=` 같은 이름 뒤의 40·64자 hex 는 비밀로 보지 않으므로, 접두 없는 비밀을 거기에 넣으면 평문으로 저장될 수 있습니다. 비밀은 항상 `${ENV}` 참조로 넣으세요([`docs/security.md`](docs/security.md)).
-- 이력 DB 스키마가 v4(마이그레이션 0004)로 올라가므로, 한 번 업그레이드한 `forge.db` 는 이전 forge 바이너리가 "더 최신" 이라며 거부합니다. hook·게이트웨이 이중 기록의 연결은 조건이 맞을 때만 되고(메타 도구 등은 이중 집계로 남음) 마스킹은 `mkdir -p` 같은 `-p` 인자도 가립니다([`docs/security.md`](docs/security.md) 4절).
+- 이력 DB 스키마가 v5(마이그레이션 0005, 레지스트리 삭제 감사; v4 는 0004)로 올라가므로, 한 번 업그레이드한 `forge.db` 는 이전 forge 바이너리가 "더 최신" 이라며 거부합니다. hook·게이트웨이 이중 기록의 연결은 조건이 맞을 때만 되고(메타 도구 등은 이중 집계로 남음) 마스킹은 `mkdir -p` 같은 `-p` 인자도 가립니다([`docs/security.md`](docs/security.md) 4절).
 - 웹 UI(M6)와 팀 공유(M7)는 구현되지 않았습니다. 프로젝트 이름은 가칭입니다.
 - 자세한 한계는 [`docs/security.md`](docs/security.md) 4절과 [`docs/sync.md`](docs/sync.md) "한계" 절.
 
