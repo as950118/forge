@@ -38,6 +38,11 @@ var stdinIsTerminal = func(r io.Reader) bool {
 // the non-interactive approval. Without a terminal and without --yes it
 // refuses: nothing may be installed because nobody could have read the preview.
 // Only "y"/"yes" approves; EOF, empty and anything else decline.
+// afterApprovalHook is a test-only seam: it runs after the user approved an install or
+// update and before the staging is moved (Restage), so a test can swap the staged tree
+// at the moment an attacker would. It is nil in production and set by no production code.
+var afterApprovalHook func(p *skill.Prepared)
+
 func confirmInstall(cmd *cobra.Command, yes bool, question, previewCmd string) error {
 	if yes {
 		return nil
@@ -323,9 +328,15 @@ func skillAddCmd() *cobra.Command {
 				}
 				closeFn = func() { _ = conn.Close() }
 				reg = r
-				if err := p.Restage(homeTmp(reg.Home), hash); err != nil {
-					return err
-				}
+			}
+			// Both paths: the read-write fallback (opts.TmpDir set: the staging already lives
+			// under FORGE_HOME/tmp) also moves the staging into a fresh directory with the
+			// approved hash, so a staging replaced after the preview is refused (TASK-0032 AC-6).
+			if afterApprovalHook != nil {
+				afterApprovalHook(p)
+			}
+			if err := p.Restage(homeTmp(reg.Home), hash); err != nil {
+				return err
 			}
 			res, err := reg.Add(ctx, p)
 			if err != nil {
@@ -433,6 +444,13 @@ func skillUpdateCmd() *cobra.Command {
 			}
 			if err := confirmInstall(cmd, yes, "위 변경을 확인했습니다. 새 버전으로 업데이트할까요?", "forge skill update "+shq(info.Name)+"   # 터미널에서 실행하면 미리보기 후 질문합니다"); err != nil {
 				return refuse(err)
+			}
+			// the staging may have been replaced while the question was open: install only the approved tree
+			if afterApprovalHook != nil {
+				afterApprovalHook(p)
+			}
+			if err := p.Restage(homeTmp(reg.Home), hash); err != nil {
+				return err
 			}
 			res, err := reg.Add(ctx, p)
 			if err != nil {

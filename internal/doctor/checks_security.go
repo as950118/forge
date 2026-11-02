@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/heonjinjeong/forge/internal/skill"
+	"github.com/heonjinjeong/forge/internal/tool"
 )
 
 const securityGroup = "security"
@@ -26,7 +27,41 @@ func checkSecurity(e *env) []Check {
 	var out []Check
 	out = append(out, e.skillIntegrity()...)
 	out = append(out, e.mcpApprovals()...)
+	out = append(out, e.legacyCodeExecTools()...)
 	return out
+}
+
+// legacyCodeExecTools (TASK-0032 AC-9, ADR-F0006 D5): a code-exec tool that was
+// registered with confirm=none before the classification existed is NOT
+// grandfathered: the gateway asks anyway (and refuses where the client cannot
+// confirm). Doctor tells the user, with the way to re-register it, so a tool that
+// "stopped working" is explained.
+func (e *env) legacyCodeExecTools() []Check {
+	reg := &tool.Registry{DB: e.db, Home: e.o.Home}
+	defs, err := reg.List(e.ctx)
+	if err != nil {
+		if isCtx(err) {
+			return nil
+		}
+		return []Check{unavailable("security.tools.codeexec", securityGroup, "코드 실행형 도구", err)}
+	}
+	var names []string
+	for i := range defs {
+		d := &defs[i]
+		if d.Enabled && d.ForcedAsk() {
+			names = append(names, safe(d.Name, 50)+" ("+safe(d.CodeExecBinary(), 30)+")")
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	first := strings.Fields(names[0])[0]
+	return []Check{mk("security.tools.codeexec", securityGroup, "코드 실행형 도구의 확인 강제", Info,
+		fmt.Sprintf("confirm=none 인 코드 실행형 도구 %d개는 게이트웨이가 확인(ask)을 강제합니다: %s", len(names), listNames(names)),
+		"인자를 코드로 해석하는 프로그램(sqlite3, npm, uv, go run 등)은 기존에 none 으로 등록했어도 그랜드파더링하지 않습니다. 확인(elicitation)을 지원하지 않는 클라이언트에서는 재등록 전까지 호출이 거부됩니다 (ADR-F0006)",
+		"forge tool list   # CONFIRM 열의 none->ask(forced) 확인",
+		"forge tool show "+e.q(first)+"   # 현재 정의 확인",
+		"forge tool add "+e.q(first)+" --replace ... --confirm none --yes-code-exec   # 위험을 이해하고 무확인으로 쓸 때만 (기존 정의 옵션을 모두 다시 지정)")}
 }
 
 func (e *env) skillIntegrity() []Check {

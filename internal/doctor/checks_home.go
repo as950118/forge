@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 
 	"github.com/heonjinjeong/forge/internal/store"
@@ -78,6 +79,13 @@ func checkDatabase(e *env) []Check {
 		case errors.Is(err, errNotForged):
 			return append(out, mk("db.integrity", "home", "DB 무결성", Fail, "forge.db 에 레지스트리 테이블이 없습니다", "Forge DB 가 아니거나 손상되었습니다",
 				"ls "+e.q(home+"/backups")+"   # forge-v<N>-<시각>.db 백업이 있으면 forge.db 로 복원하세요"))
+		}
+		if f, oerr := os.Open(path); oerr != nil && errors.Is(oerr, fs.ErrPermission) {
+			return append(out, mk("db.integrity", "home", "DB 무결성", Fail, "forge.db 를 읽을 수 없습니다: 권한이 없습니다 ("+safe(oerr.Error(), 160)+")",
+				"권한 문제입니다. 파일은 손상되지 않았을 수 있으며 현재 사용자에게 읽기 권한이 없습니다 (소유자나 모드가 바뀌었는지 확인)",
+				"ls -l "+e.q(path), "chmod 600 "+e.q(path)+"   # 본인 소유일 때"))
+		} else if f != nil {
+			_ = f.Close()
 		}
 		return append(out, mk("db.integrity", "home", "DB 무결성", Fail, safe(err.Error(), 200), "파일이 손상되었거나 SQLite DB 가 아닙니다",
 			"ls "+e.q(home+"/backups")+"   # forge-v<N>-<시각>.db 백업이 있으면 복원하세요"))

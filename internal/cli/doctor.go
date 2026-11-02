@@ -21,8 +21,10 @@ func doctorCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "doctor [--scope project|user|all] [--project-dir <dir>] [--json] [--strict]",
-		Short: "Check the Forge home, client installs, sync drift, broken paths, history and profiles (read-only)",
-		Long: `Forge 의 상태를 점검합니다. 읽기 전용입니다: 아무것도 만들거나 고치거나 지우지 않고, 고칠 방법은 정확한 명령으로 안내만 합니다.
+		Short: "Check the Forge home, client installs, sync drift, broken paths, history and profiles (read-only except stale temp dirs)",
+		Long: `Forge 의 상태를 점검합니다. Forge 홈·DB·클라이언트 설정은 읽기만 합니다: 아무것도 만들거나 고치거나 지우지 않고, 고칠 방법은 정확한 명령으로 안내만 합니다.
+단 하나의 예외: 클라이언트 버전 확인(<client> --version)을 시작할 때 TMPDIR 의 죽은 forge 프로세스가 남긴 임시 디렉터리 forge-ver-<pid>-<난수> 를
+(본인 소유, 1시간 넘게 오래됨, 그 pid 가 없을 때만, 정확한 경로) 지웁니다. 그 밖의 파일은 지우지 않습니다.
 
 점검 항목: 홈·DB(권한, quick_check, 마이그레이션, WAL) / 클라이언트 탐지와 버전 게이팅(<client> --version 만 실행) /
 sync 드리프트(미적용 변경, 충돌, 중단된 저널, 임시 파일, 백업 의존성, 링크 거부) / 깨진 경로·미연결(스킬 디렉터리,

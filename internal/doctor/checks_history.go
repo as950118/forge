@@ -44,8 +44,9 @@ func checkHistory(e *env) []Check {
 		out = append(out, unavailable("history.size", "history", "이력 크기", err))
 	case rows > bigLedgerRows || size > bigDBBytes:
 		out = append(out, mk("history.size", "history", "이력 크기", Warn, fmt.Sprintf("원장 %s%d행, DB %s", map[bool]string{true: "약 ", false: ""}[approx], rows, humanBytes(size)),
-			"이력이 매우 커서 기간 없는 집계가 느립니다. 오래된 행을 정리하는 forge 명령은 아직 없습니다",
-			"forge history --format csv --output ledger-backup.csv --since 365d   # 먼저 내보내기", "forge history summary --since 30d   # 기간을 좁혀 조회"))
+			"이력이 매우 커서 기간 없는 집계가 느립니다. 오래된 행은 forge history prune 으로 정리할 수 있습니다 (기본 dry-run)",
+			"forge history --format csv --output ledger-backup.csv --since 365d   # 먼저 내보내기",
+			"forge history prune --before 365d   # 지울 행 수 확인(dry-run). 실제 삭제는 --yes", "forge history summary --since 30d   # 기간을 좁혀 조회"))
 	default:
 		out = append(out, mk("history.size", "history", "이력 크기", OK, fmt.Sprintf("원장 %s%d행, DB %s", map[bool]string{true: "약 ", false: ""}[approx], rows, humanBytes(size)), ""))
 	}

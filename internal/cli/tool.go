@@ -339,7 +339,7 @@ const confirmAskNote = `안내: confirm=ask(기본) 도구는 호출마다 클�
 // instead (code-exec without acknowledgement).
 func confirmShown(d tool.Definition) string {
 	if d.ForcedAsk() {
-		return d.Policy.Confirm + "→ask(강제)"
+		return d.Policy.Confirm + "->ask(forced)"
 	}
 	return d.Policy.Confirm
 }

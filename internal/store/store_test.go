@@ -253,7 +253,7 @@ func TestOpenMemoryDB(t *testing.T) {
 		t.Errorf("foreign_keys=%q", got)
 	}
 	var n int
-	if err := c.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 4 {
+	if err := c.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 5 {
 		t.Errorf("migrations not applied: n=%d err=%v", n, err)
 	}
 }
@@ -348,7 +348,7 @@ func TestMigration0002UpgradePath(t *testing.T) {
 		var v int
 		var sum string
 		_ = rows.Scan(&v, &sum)
-		name := map[int]string{1: "0001_init.sql", 2: "0002_mcp_tool_approvals.sql", 3: "0003_misses_mcp_server.sql", 4: "0004_ledger_calls_fail_first.sql"}[v]
+		name := map[int]string{1: "0001_init.sql", 2: "0002_mcp_tool_approvals.sql", 3: "0003_misses_mcp_server.sql", 4: "0004_ledger_calls_fail_first.sql", 5: "0005_registry_deletions.sql"}[v]
 		b, _ := fs.ReadFile(db.Migrations(), name)
 		h := sha256.Sum256(b)
 		if sum != hex.EncodeToString(h[:]) {
@@ -356,7 +356,7 @@ func TestMigration0002UpgradePath(t *testing.T) {
 		}
 		got++
 	}
-	if got != 4 {
+	if got != 5 {
 		t.Errorf("schema_migrations rows=%d", got)
 	}
 }
@@ -369,7 +369,7 @@ func TestMigration0002TamperAndDowngrade(t *testing.T) {
 	if err := Migrate(ctx, c, db.Migrations()); err != nil {
 		t.Fatal(err)
 	}
-	tampered := realMigrationsUpTo(t, 4)
+	tampered := realMigrationsUpTo(t, 5)
 	tampered["0002_mcp_tool_approvals.sql"] = &fstest.MapFile{Data: append(append([]byte{}, tampered["0002_mcp_tool_approvals.sql"].Data...), []byte("\n-- x\n")...)}
 	if err := Migrate(ctx, c, tampered); !errors.Is(err, ErrChecksum) {
 		t.Errorf("tampered 0002: err=%v, want ErrChecksum", err)

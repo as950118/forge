@@ -20,7 +20,7 @@
 그래서 대소문자 구분 없는 파일 시스템(macOS 기본)에서 `x/proj`, `x/PROJ`, `x/Proj` 가 한 프로젝트이고(셸은 입력한 대소문자를 cwd 로 유지한다), 심볼릭 링크·`..`·`.`·후행 슬래시 통합은 기존대로 `ProjectRoot` 가 먼저 한다.
 새 행을 만들 때는 디스크에 저장된 실제 대소문자로 경로를 복원해 저장한다(각 구성요소를 대소문자만 바꿔 보아 같은 파일을 가리킬 때만 디렉터리를 열거해 실제 이름을 찾는다; `F_GETPATH` 같은 플랫폼 전용 호출은 쓰지 않았다). 복원하지 못하면 입력한 철자로 저장해도 위 `SameFile` 재사용이 같은 프로젝트로 묶는다.
 대소문자를 구분하는 파일 시스템에서는 `x/proj` 와 `x/PROJ` 가 서로 다른 inode 이므로 갈라진 채로 둔다(오탐 없음). 서로 다른 프로젝트는 합쳐지지 않는다(하드링크된 디렉터리는 없다고 본다). 동시에 서로 다른 철자로 `profile use` 를 해도 쓰기는 `BEGIN IMMEDIATE` 로 직렬화되므로 행은 하나다(테스트 `TestConcurrentUseWithTwoSpellingsMakesOneRow`).
-이 규칙 이전에 이미 갈라진 행이 있으면 자동으로 합치지 않는다(`forge profile prune-stale` 이 경로가 없는 행만 정리한다).
+이 규칙 이전에 이미 갈라진 행이 있으면 자동으로 합치지 않는다(`forge profile prune-stale` 이 경로가 없는 행만 정리하고, 같은 디렉터리의 중복 행은 `forge profile merge-projects` 로 직접 합친다).
 `forge sync --scope user` 는 모든 프로젝트에 적용되므로 **전역 활성 프로필만** 따른다(계획 참고에 그렇게 적힌다).
 규칙은 계획 출력의 `참고:` 줄(예: `프로필 "work" 적용 (전역 활성화, 클라이언트 opencode): 프로필에 없는 항목은 노출되지 않습니다(허용 목록)`), `forge profile current`, `forge doctor` 의 `프로필 규칙` 항목에 표시된다.
 
@@ -63,6 +63,7 @@ forge profile use <name> --client claude-code|opencode|all [--project-dir <dir>]
 forge profile unuse --client claude-code|opencode|all [--project-dir <dir>]
 forge profile current [--client <id>|all] [--project-dir <dir>] [--json]
 forge profile prune-stale [--dry-run] [--yes] [--json]
+forge profile merge-projects <from> <to> [--yes] [--json]
 ```
 
 - **범위**: 프로필은 전역(기본) 또는 프로젝트 소속(`--project-dir`)이다. 이름은 범위(와 프로젝트)마다 유일하다. `create/show/delete/add/remove` 는 지정한 범위만 보며 다른 범위로 대체하지 않는다. `--global` 과 `--project-dir` 은 함께 쓸 수 없다.
@@ -114,3 +115,12 @@ claude-code 가 `.claude/skills` 에 관리하는 스킬은 opencode 계획이 �
 - 경로 동일성은 `stat`/`SameFile` 에 의존한다: 다른 사용자의 권한 없는 디렉터리·끊긴 마운트는 "같은지 알 수 없음"이라 별개 프로젝트로 남을 수 있다. 하드링크된 디렉터리는 없다고 보고, 유니코드 정규화(NFC/NFD) 철자 차이는 따로 다루지 않는다(같은 디렉터리로 열리는 철자면 `SameFile` 이 묶지만 그 동작은 파일 시스템에 따라 확인하지 않았다).
 - `.forge/forge.yaml` 매니페스트로 프로필을 git 으로 공유하는 기능은 없다(M7).
 - 스킬 핀은 `forge_skill`·sync 에 적용된다. 클라이언트가 `~/.forge/skills` 를 직접 읽지는 않는다.
+
+## 중복 프로젝트 행 병합 (TASK-0032 AC-3)
+
+`forge profile merge-projects <from> <to>` 는 같은 디렉터리의 두 `projects` 행(`<from>`, `<to>` 는 doctor 가 보여 준 저장된 경로 문자열)을 합쳐 `<from>` 을 지운다. **기본은 dry-run**(무엇을 옮길지 출력), `--yes` 일 때만 한 트랜잭션으로 실행한다.
+
+- 옮기는 것: `<from>` 의 프로젝트 프로필·프로젝트 범위 스킬/도구/MCP 서버(`project_id`)와 활성화. 같은 클라이언트에 같은 프로필을 활성화한 것은 `<from>` 쪽을 버린다. 프로필은 지우지 않는다.
+- 조건: 두 경로가 존재하고 `os.SameFile` 로 같은 디렉터리여야 한다(없어진 프로젝트는 `prune-stale`).
+- 충돌이면 **아무것도 바꾸지 않고 중단**한다: 같은 클라이언트에 서로 다른 프로필이 활성이거나, 같은 이름의 프로젝트 프로필·스킬·도구·MCP 서버가 양쪽에 있는 경우(전부 나열). 사용자가 `unuse` 나 이름 변경 뒤 다시 실행한다.
+- 남은 참조가 하나라도 있으면(검증) 롤백하고 중단한다. 이력의 `project` 문자열은 기록 당시 철자로 남는다. 설정 파일은 바뀌지 않으므로 필요하면 `forge sync` 를 다시 한다.

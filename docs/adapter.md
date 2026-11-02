@@ -158,7 +158,7 @@ TASK-0027 에서 확인한 **동치 변이**(관측할 수 있는 동작이 같�
 |------|------|------|
 | 검증 후 백업 | `engine.go` `applyOps` | 쓰기 전에 모든 `Before` 해시를 재검증(`ErrStale`), 바꿀 기존 파일을 `$FORGE_HOME/backups/<id>/` 에 복사하고 manifest(target·scope·root·항목별 before/after)를 쓴다. 백업 실패 시 아무것도 바꾸지 않는다 |
 | 저널·크래시 복구 | `journal.go`, `engine.go` | 첫 쓰기 전에 저널(`pending`)을 백업 디렉터리와 상태 파일 옆에 쓰고, 다음 plan 이 `DetectInterrupted`(같은 target·scope·root)로 중단을 감지, apply 가 "앞으로 완료". 위조 저널은 `AllowedPath` 검증과 해시 일관성 검사로 무시 |
-| 롤백 | `engine.go` `rollback` | 중간 실패 시 백업으로 되돌리고 저널을 `rolled_back` 으로 표시 |
+| 롤백 | `engine.go` `rollback` | 중간 실패 시 백업으로 되돌리고 저널을 `rolled_back` 으로 표시. 시험: 작은 스킬이 먼저 쓰인 뒤 큰 파일이 EFBIG 로 실패하는 변형(`task27_fsize_unix_test.go` small-first)과 `Inject` 기반 시험(`task32_rollback_test.go`)이 "rollback 을 부르지 않는" 변이와 "만든 디렉터리를 지우지 않는" 변이(두 호출 지점 모두 제거)를 잡는다. `applyOps` 에서 롤백 뒤 `removeCreatedDirs(created)` 만 따로 제거하는 변이는 **동등 변이**다: `rollback()` 이 같은 목록(`m.CreatedDirs == created`)을 이미 지우고, 저널 사본의 디렉터리는 `dropJournalCopy` 가 지우므로 관측 가능한 차이가 없다(TASK-0032 AC-11에서 확인) |
 | 복원 | `restore.go` | `--restore`: manifest 를 `ValidateManifest`(target 일치, 절대·정규 경로, `GuardPath`, `AllowedPath`)로 검증하고 해시 드리프트는 `--force` 요구, 복원 직전 상태를 새 백업으로 보존. **다른 target 의 백업은 거부**(`백업 대상("…")과 어댑터("…")가 다릅니다`) |
 | 잠금 | `lock*.go` | `AcquireLock(<forge home>/locks, LockKey(target, scope, root))` — 같은 target+root 만 직렬화 |
 | 원자적 쓰기 | `fsx.go` | 같은 디렉터리 임시 파일 + fsync + rename, 스킬 디렉터리는 임시 디렉터리 복사 후 rename. 심볼릭 링크 검사(`CheckNoSymlinks`)·읽기 전용 신호(`WriteBlocker`) |
