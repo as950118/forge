@@ -133,12 +133,24 @@ func renderSkillPreview(w io.Writer, pv *skill.Preview, title string) {
 		}
 	}
 	if len(pv.Executables) > 0 {
-		p("\n[실행 가능한 파일] (내용은 검사하지 않음 — 크기·해시·인터프리터만 표시)\n")
+		p("\n[실행 가능한 파일] (위험도 순: 위험 패턴·실행 비트·셔뱅 우선, 같으면 경로 순 — 패턴과 첫 줄은 휴리스틱이며 파일 일부일 뿐)\n")
 		for _, e := range pv.Executables {
 			p("  %s  %d바이트  sha256=%s  인터프리터=%s  (%s)\n", e.Path, e.Size, e.SHA256, orDash(e.Interpreter), strings.Join(e.Reasons, ", "))
+			if len(e.RiskPatterns) > 0 {
+				p("    위험 패턴: %s\n", strings.Join(e.RiskPatterns, ", "))
+			}
+			for i, ln := range e.Head {
+				p("    %2d| %s\n", i+1, ln)
+			}
+			if e.HeadMore {
+				p("    … (이하 생략)\n")
+			}
 		}
 		if pv.ExecMore > 0 {
-			p("  … 외 %d개\n", pv.ExecMore)
+			p("  … 외 %d개 (위험도가 낮은 순서; 목록에서 생략됨)\n", pv.ExecMore)
+		}
+		if pv.ExecRisky > 0 {
+			p("  위험 패턴이 있는 실행 가능한 파일: 전체 %d개\n", pv.ExecRisky)
 		}
 	} else {
 		p("\n[실행 가능한 파일] 없음\n")

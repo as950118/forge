@@ -41,6 +41,7 @@ type ext struct {
 	AllowVarSubcmd   bool     `json:"allow_var_subcommand,omitempty"`
 	AllowPrivate     bool     `json:"allow_private,omitempty"`
 	AllowHTTP        bool     `json:"allow_http,omitempty"`
+	AckCodeExec      bool     `json:"ack_code_exec,omitempty"`
 	MaxOutputBytes   int      `json:"max_output_bytes,omitempty"`
 	MaxRedirects     int      `json:"max_redirects,omitempty"`
 }
@@ -76,7 +77,7 @@ func (r *Registry) Add(ctx context.Context, d Definition, replace bool) (*Defini
 	now := r.now()
 	args, _ := json.Marshal(append([]string{}, d.Args...))
 	ex, _ := json.Marshal(ext{Shell: d.Shell, Body: d.BodyTemplate, Allow: d.Policy.Allow, AllowLeadingDash: d.Policy.AllowLeadingDash, AllowVarSubcmd: d.Policy.AllowVarSubcommand,
-		AllowPrivate: d.Policy.AllowPrivate, AllowHTTP: d.Policy.AllowHTTP, MaxOutputBytes: d.Policy.MaxOutputBytes, MaxRedirects: d.Policy.MaxRedirects})
+		AllowPrivate: d.Policy.AllowPrivate, AllowHTTP: d.Policy.AllowHTTP, AckCodeExec: d.Policy.AckCodeExec, MaxOutputBytes: d.Policy.MaxOutputBytes, MaxRedirects: d.Policy.MaxRedirects})
 
 	tx, err := r.DB.BeginTx(ctx, nil) // BEGIN IMMEDIATE (store.OpenRaw _txlock)
 	if err != nil {
@@ -237,6 +238,7 @@ func (r *Registry) fill(ctx context.Context, id int64, d *Definition, values boo
 	d.Shell, d.BodyTemplate = ex.Shell, ex.Body
 	d.Policy.Allow, d.Policy.AllowLeadingDash, d.Policy.AllowPrivate, d.Policy.AllowHTTP = ex.Allow, ex.AllowLeadingDash, ex.AllowPrivate, ex.AllowHTTP
 	d.Policy.AllowVarSubcommand = ex.AllowVarSubcmd
+	d.Policy.AckCodeExec = ex.AckCodeExec
 	d.Policy.MaxOutputBytes, d.Policy.MaxRedirects = ex.MaxOutputBytes, ex.MaxRedirects
 	if d.Policy.MaxOutputBytes == 0 {
 		d.Policy.MaxOutputBytes = DefaultMaxOutput
@@ -244,6 +246,7 @@ func (r *Registry) fill(ctx context.Context, id int64, d *Definition, values boo
 	if d.Policy.MaxRedirects == 0 {
 		d.Policy.MaxRedirects = DefaultMaxRedirects
 	}
+	d.refreshRisk()
 	if !values {
 		return nil
 	}

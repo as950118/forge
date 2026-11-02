@@ -16,9 +16,10 @@ import (
 
 // Refusal texts (Korean). The unsupported text is the guidance required by TASK-0007.
 const (
-	msgNoElicit = "사용자 확인이 필요한 도구입니다 (confirm=ask). 이 클라이언트는 확인 요청(elicitation)을 지원하지 않아 실행하지 않았습니다: forge tool test 로 직접 실행하거나 정책을 변경하세요 (forge tool add --replace ... --confirm none)"
-	msgDeclined = "사용자가 실행을 거부했습니다. 도구를 실행하지 않았습니다"
-	msgNoAnswer = "사용자 확인을 받지 못해 도구를 실행하지 않았습니다 (확인 요청 실패 또는 시간 초과)"
+	msgNoElicit         = "사용자 확인이 필요한 도구입니다 (confirm=ask). 이 클라이언트는 확인 요청(elicitation)을 지원하지 않아 실행하지 않았습니다: forge tool test 로 직접 실행하거나 정책을 변경하세요 (forge tool add --replace ... --confirm none)"
+	msgNoElicitCodeExec = "사용자 확인이 필요한 도구입니다 (코드 실행형 프로그램, risk=code-exec 는 confirm=none 이어도 확인을 강제합니다). 이 클라이언트는 확인 요청(elicitation)을 지원하지 않아 실행하지 않았습니다: forge tool test 로 직접 실행하거나, 위험을 이해한 경우에만 forge tool add --replace ... --confirm none --yes-code-exec 로 다시 등록하세요"
+	msgDeclined         = "사용자가 실행을 거부했습니다. 도구를 실행하지 않았습니다"
+	msgNoAnswer         = "사용자 확인을 받지 못해 도구를 실행하지 않았습니다 (확인 요청 실패 또는 시간 초과)"
 )
 
 var approveSchema = map[string]any{
@@ -39,6 +40,9 @@ var approveSchema = map[string]any{
 func (g *Gateway) confirm(ctx context.Context, ss *sdk.ServerSession, def *tool.Definition, args map[string]any) (string, string) {
 	p := ss.InitializeParams()
 	if p == nil || p.Capabilities == nil || p.Capabilities.Elicitation == nil {
+		if def.CodeExecBinary() != "" {
+			return msgNoElicitCodeExec, classNoElicit
+		}
 		return msgNoElicit, classNoElicit
 	}
 	// DryRun validates the arguments (invalid ones are reported without bothering
@@ -94,6 +98,9 @@ func confirmMessage(def *tool.Definition, plan *tool.Result) string {
 	fmt.Fprintf(&b, "Forge 도구 %s (%s) 를 실행할까요?\n", quoteValue(def.Name, 120), escapeText(def.Kind, 20))
 	if d := strings.TrimSpace(def.Description); d != "" {
 		b.WriteString("설명: " + quoteValue(d, maxDescShown) + "\n")
+	}
+	if bin := def.CodeExecBinary(); bin != "" {
+		b.WriteString("위험: " + quoteValue("코드 실행형 프로그램 "+bin+" (risk=code-exec): 인자가 코드·명령으로 해석될 수 있습니다", 200) + "\n")
 	}
 	if pl := plan.DryRun; pl != nil {
 		switch {

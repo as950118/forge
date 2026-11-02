@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -222,6 +223,10 @@ func safeDialContext(allowPrivate bool, lookup func(context.Context, string) ([]
 	}
 }
 
+// testTLSConfig is nil in production (system roots). Tests set it to trust an
+// httptest TLS server; it is never reachable from a definition or the CLI.
+var testTLSConfig *tls.Config
+
 func runHTTP(ctx context.Context, def *Definition, args map[string]any, o RunOptions, m *masker, res *Result, maxOut int) error {
 	plan, err := buildHTTP(def, args, o, m, o.DryRun)
 	if err != nil {
@@ -264,6 +269,7 @@ func runHTTP(ctx context.Context, def *Definition, args map[string]any, o RunOpt
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 0,
 		DisableKeepAlives:     true,
+		TLSClientConfig:       testTLSConfig,
 	}
 	defer tr.CloseIdleConnections()
 	client := &http.Client{
