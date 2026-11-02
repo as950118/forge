@@ -86,7 +86,7 @@ func (g *Gateway) callList(ctx context.Context, client string) *sdk.CallToolResu
 	var b strings.Builder
 	b.WriteString("## 도구\n")
 	for _, e := range cat.entries {
-		fmt.Fprintf(&b, "- %s: %s\n", e.Name, listText(strings.SplitN(e.Desc, "\n", 2)[0], 160))
+		fmt.Fprintf(&b, "- %s: %s\n", e.Name, cutClean(strings.SplitN(e.Desc, "\n", 2)[0], 160))
 	}
 	b.WriteString("\n## 스킬 (forge_skill 로 조회)\n")
 	infos, _ := g.o.Skills.List(ctx)

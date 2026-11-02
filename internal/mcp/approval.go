@@ -30,6 +30,10 @@ const (
 
 func enforceKey(server string) string { return "mcp.enforce." + server }
 
+// allowPrivateKey is the settings key of the per-server "may connect to private
+// addresses" opt-in (TASK-0020 AC-12; no row = off).
+func allowPrivateKey(server string) string { return "mcp.allow_private." + server }
+
 // ToolChange is one finding of a refresh. Description texts are sanitized
 // (textsafe) and cut to the changed span, so a long description cannot hide an
 // appended instruction behind the cut.
@@ -336,6 +340,35 @@ func (r *Registry) SetEnforce(ctx context.Context, name string, on bool) error {
 			ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, enforceKey(name), "1", r.now())
 	} else {
 		_, err = tx.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, enforceKey(name))
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetAllowPrivate allows (or revokes) connections of a remote server to loopback,
+// private and CGNAT addresses, including addresses a DNS name resolves to and
+// redirect targets. Link-local, multicast, unspecified and cloud metadata addresses
+// are blocked regardless (settings key mcp.allow_private.<server>; no row = off).
+func (r *Registry) SetAllowPrivate(ctx context.Context, name string, on bool) error {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM mcp_servers WHERE scope='global' AND project_id IS NULL AND name=?`, name).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("%w: %s", ErrNotFound, name)
+	}
+	if on {
+		_, err = tx.ExecContext(ctx, `INSERT INTO settings(key, value, updated_at) VALUES (?,?,?)
+			ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, allowPrivateKey(name), "1", r.now())
+	} else {
+		_, err = tx.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, allowPrivateKey(name))
 	}
 	if err != nil {
 		return err

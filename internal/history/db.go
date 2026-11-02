@@ -43,7 +43,10 @@ func Open(ctx context.Context, home string) (*sql.DB, error) {
 // writes still sitting in the WAL is then not visible. Any other failure is returned.
 func OpenNote(ctx context.Context, home string) (*sql.DB, string, error) {
 	path := store.DBPath(home)
-	if st, err := os.Stat(path); err != nil || st.IsDir() {
+	if err := store.CheckDBLocation(path); err != nil {
+		return nil, "", err
+	}
+	if _, err := os.Stat(path); err != nil {
 		return nil, "", fmt.Errorf("%w (%s)", ErrNotInitialized, path)
 	}
 	db, err := openMode(ctx, path, false)

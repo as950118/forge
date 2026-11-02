@@ -57,7 +57,18 @@ type call struct {
 	gc   *ledger.GatewayCall
 	in   json.RawMessage
 	done bool
+	// wait bounds each ledger write of this call (0 = defaultLedgerWait). Miss rows
+	// use missWriteTimeout so a busy database never stalls the client's call.
+	wait time.Duration
 }
+
+// defaultLedgerWait bounds a ledger write of a normal call; missWriteTimeout bounds
+// the rows of a call that failed to resolve (AC-9: a miss row is never worth a
+// multi-second wait on a locked database).
+const (
+	defaultLedgerWait = 5 * time.Second
+	missWriteTimeout  = 250 * time.Millisecond
+)
 
 // callRecorder adds the payload (stored only when settings.record_payload=1,
 // and then always masked by the ledger) to the event the GatewayRecorder builds.
@@ -98,7 +109,11 @@ func (c *call) safe(f func(ctx context.Context) error) (ok bool) {
 			c.g.log.Debug("ledger panic", "recover", r)
 		}
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	wait := c.wait
+	if wait <= 0 {
+		wait = defaultLedgerWait
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
 	if err := f(ctx); err != nil {
 		c.g.log.Debug("ledger write failed", "error", err)
@@ -234,10 +249,140 @@ func (g *Gateway) beginFor(client, version string, e *entry, raw json.RawMessage
 	return &call{g: g, done: true}
 }
 
-// maxUnknownRows bounds the ledger rows a gateway session spends on names that
-// match nothing registered (a client or model that invents tool names must not
-// grow the ledger without limit). Further names are only debug-logged.
-const maxUnknownRows = 100
+// Row-count policy of the gateway's miss rows (TASK-0020 AC-3, AC-9).
+//
+//   - Names that match nothing registered, and names with a registered server's
+//     prefix whose tool that server does not have ("invented" names), are
+//     deduplicated per session and bounded by maxUnknownRows per session.
+//   - A call to a name that IS registered (custom tool, or a tool a registered
+//     server is known to have) keeps one row per attempt, because ADR-F0002's
+//     miss counts are attempt counts; a session is bounded by
+//     maxRegisteredMissRows as a safety net against a looping client.
+//   - Across sessions (restart loops start a new session every time) the first
+//     invented-name row of a gateway process prunes old unattributed miss rows to
+//     the newest globalMissKeep (ledger.SQLite.PruneGatewayMisses). Rows of
+//     registered custom tools and hidden_by_profile rows are never pruned.
+//
+// Every miss write is bounded by missWriteTimeout and never runs under a lock.
+const (
+	maxUnknownRows        = 100
+	maxRegisteredMissRows = 1000
+	globalMissKeep        = 2000
+	maxPruneAttempts      = 3
+)
+
+// pruner is implemented by the SQLite recorder (ledger.SQLite).
+type pruner interface {
+	PruneGatewayMisses(ctx context.Context, keep int) (int64, error)
+}
+
+// reserveInvented claims one of the per-session slots for an invented name. A
+// duplicate or a full session gets false. The slot is claimed before the write and
+// released again (releaseInvented) when the write fails, so only rows that were
+// really written use up a slot while the lock is never held across the write.
+func (g *Gateway) reserveInvented(key safeName) bool {
+	g.unkMu.Lock()
+	defer g.unkMu.Unlock()
+	if _, dup := g.unknown[key]; dup {
+		g.log.Debug("unknown tool name not recorded (duplicate)", "name", string(key))
+		return false
+	}
+	if len(g.unknown) >= maxUnknownRows {
+		g.log.Debug("unknown tool name not recorded (session limit)", "name", string(key))
+		return false
+	}
+	if g.unknown == nil {
+		g.unknown = map[safeName]struct{}{}
+	}
+	g.unknown[key] = struct{}{}
+	return true
+}
+
+func (g *Gateway) releaseInvented(key safeName) {
+	g.unkMu.Lock()
+	delete(g.unknown, key)
+	g.unkMu.Unlock()
+}
+
+func (g *Gateway) reserveRegistered() bool {
+	g.unkMu.Lock()
+	defer g.unkMu.Unlock()
+	if g.regMisses >= maxRegisteredMissRows {
+		g.log.Debug("registered miss not recorded (session limit)")
+		return false
+	}
+	g.regMisses++
+	return true
+}
+
+func (g *Gateway) releaseRegistered() {
+	g.unkMu.Lock()
+	g.regMisses--
+	g.unkMu.Unlock()
+}
+
+// missCall opens the (bounded-wait) ledger bookkeeping of a miss row.
+func (g *Gateway) missCall(client, version, kind string, name safeName, server string) *call {
+	c := g.begin(client, version, kind, name, server, "", nil)
+	c.wait = missWriteTimeout
+	return c
+}
+
+// recordRegistered writes one per-attempt row of a registered name's miss.
+func (g *Gateway) recordRegistered(client, version, kind string, name safeName, server, class string, found *bool) {
+	if !g.reserveRegistered() {
+		return
+	}
+	if !g.missCall(client, version, kind, name, server).endClass(class, found) {
+		g.releaseRegistered()
+	}
+}
+
+// recordInvented writes the once-per-session row of an invented name and, after the
+// first successful write of this process, prunes old rows across sessions.
+func (g *Gateway) recordInvented(client, version, kind string, name safeName, server string) {
+	key := name
+	if server != "" {
+		key = safeName(server + "\x00" + string(name))
+	}
+	if !g.reserveInvented(key) {
+		return
+	}
+	if !g.missCall(client, version, kind, name, server).endClass(classNotFound, ledger.Bool(false)) {
+		g.releaseInvented(key)
+		return
+	}
+	g.pruneOld()
+}
+
+// pruneOld applies the global retention once per process (at most
+// maxPruneAttempts tries when the database is busy).
+func (g *Gateway) pruneOld() {
+	p, ok := g.o.Recorder.(pruner)
+	if !ok {
+		return
+	}
+	g.unkMu.Lock()
+	if g.pruned || g.pruneTries >= maxPruneAttempts {
+		g.unkMu.Unlock()
+		return
+	}
+	g.pruneTries++
+	g.unkMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), missWriteTimeout)
+	defer cancel()
+	n, err := p.PruneGatewayMisses(ctx, globalMissKeep)
+	if err != nil {
+		g.log.Debug("ledger prune failed", "error", err)
+		return
+	}
+	g.unkMu.Lock()
+	g.pruned = true
+	g.unkMu.Unlock()
+	if n > 0 {
+		g.log.Debug("old unattributed miss rows pruned", "rows", n)
+	}
+}
 
 // recordUnknown logs a call to a name the gateway does not expose. A name that
 // matches something registered (forge_<registered tool>, <normalized registered
@@ -246,7 +391,8 @@ const maxUnknownRows = 100
 // server) is recorded as kind=tool with no server attribution, once per session
 // (deduplicated by sanitized name, at most maxUnknownRows rows per session; only
 // rows that were really written use up a slot); a name of neither shape is not
-// recorded. The name is sanitized exactly once, by cleanName.
+// recorded. The name is sanitized exactly once, by cleanName. See the policy
+// comment above for the row-count rules.
 func (g *Gateway) recordUnknown(ctx context.Context, client, version, name string) (hiddenClass string) {
 	if d, ok := g.registeredTool(ctx, name); ok {
 		// Registered, enabled and allowed by policy but not visible to this client under
@@ -256,7 +402,7 @@ func (g *Gateway) recordUnknown(ctx context.Context, client, version, name strin
 		if d.Enabled && d.Policy.Confirm != tool.ConfirmDeny && !g.exposure(ctx).ToolVisible(d, client) {
 			class, found = classHidden, ledger.Bool(true)
 		}
-		g.begin(client, version, ledger.KindTool, cleanName(d.Name), "", "", nil).endClass(class, found)
+		g.recordRegistered(client, version, ledger.KindTool, cleanName(d.Name), "", class, found)
 		if *found {
 			return class
 		}
@@ -264,14 +410,22 @@ func (g *Gateway) recordUnknown(ctx context.Context, client, version, name strin
 	}
 	if s, tl, ok := g.registeredServerTool(ctx, name); ok {
 		class, found := classNotFound, ledger.Bool(false)
+		known := g.serverHasTool(ctx, s.Name, string(tl))
 		if s.Enabled && g.exposure(ctx).ServerMode(s, client) != mcp.ExposureGateway {
 			// The (enabled) server is registered but not proxied for this client. Only a tool
 			// the server is known to have counts as found (a typo on a hidden server stays a miss).
-			if g.serverHasTool(ctx, s.Name, string(tl)) {
+			if known {
 				class, found = classHidden, ledger.Bool(true)
 			}
 		}
-		g.begin(client, version, ledger.KindMCP, tl, s.Name, "", nil).endClass(class, found)
+		if !known {
+			// A name the server does not have: an invented name, deduplicated and bounded
+			// per session (the registered server prefix would otherwise let one client
+			// write unlimited distinct rows).
+			g.recordInvented(client, version, ledger.KindMCP, tl, s.Name)
+		} else {
+			g.recordRegistered(client, version, ledger.KindMCP, tl, s.Name, class, found)
+		}
 		if *found {
 			return class
 		}
@@ -283,26 +437,7 @@ func (g *Gateway) recordUnknown(ctx context.Context, client, version, name strin
 	default:
 		return ""
 	}
-	clean := cleanName(name)
-	// The lock is held across the write so the count only ever includes rows that
-	// were written and concurrent calls cannot overshoot the limit.
-	g.unkMu.Lock()
-	defer g.unkMu.Unlock()
-	if _, dup := g.unknown[clean]; dup {
-		g.log.Debug("unknown tool name not recorded (duplicate)", "name", clean)
-		return ""
-	}
-	if len(g.unknown) >= maxUnknownRows {
-		g.log.Debug("unknown tool name not recorded (session limit)", "name", clean)
-		return ""
-	}
-	c := g.begin(client, version, ledger.KindTool, clean, "", "", nil)
-	if c.endClass(classNotFound, ledger.Bool(false)) {
-		if g.unknown == nil {
-			g.unknown = map[safeName]struct{}{}
-		}
-		g.unknown[clean] = struct{}{}
-	}
+	g.recordInvented(client, version, ledger.KindTool, cleanName(name), "")
 	return ""
 }
 

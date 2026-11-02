@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -108,10 +109,11 @@ func (r *SQLite) Record(ctx context.Context, ev Event) (int64, error) {
 	if ts.IsZero() {
 		ts = time.Now()
 	}
-	tx, err := r.DB.BeginTx(ctx, nil)
+	tx, release, err := r.begin(ctx)
 	if err != nil {
 		return 0, err
 	}
+	defer release()
 	defer func() { _ = tx.Rollback() }()
 
 	var clientKnown int
@@ -254,6 +256,53 @@ ON CONFLICT(client, session_id) DO UPDATE SET
 		return 0, err
 	}
 	return id, nil
+}
+
+// begin starts the write transaction. database/sql cannot interrupt SQLite's busy
+// wait (busy_timeout is 5s on every connection), so when ctx carries a deadline
+// shorter than that, the transaction runs on a dedicated connection whose
+// busy_timeout is lowered to the time left and restored by release. A caller that
+// passes a short deadline (the gateway's miss rows, TASK-0020 AC-9) therefore
+// waits at most about that long for a database held by another writer.
+func (r *SQLite) begin(ctx context.Context) (*sql.Tx, func(), error) {
+	noop := func() {}
+	dl, ok := ctx.Deadline()
+	if !ok {
+		tx, err := r.DB.BeginTx(ctx, nil)
+		return tx, noop, err
+	}
+	left := time.Until(dl).Milliseconds()
+	if left < 1 {
+		left = 1
+	}
+	conn, err := r.DB.Conn(ctx)
+	if err != nil {
+		return nil, noop, err
+	}
+	var orig int64
+	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&orig); err != nil || orig <= left {
+		// unknown or already short enough: use the connection as is
+		tx, err2 := conn.BeginTx(ctx, nil)
+		if err2 != nil {
+			_ = conn.Close()
+			return nil, noop, err2
+		}
+		return tx, func() { _ = conn.Close() }, nil
+	}
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout = %d`, left)); err != nil {
+		_ = conn.Close()
+		return nil, noop, err
+	}
+	restore := func() {
+		_, _ = conn.ExecContext(context.Background(), fmt.Sprintf(`PRAGMA busy_timeout = %d`, orig))
+		_ = conn.Close()
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		restore()
+		return nil, noop, err
+	}
+	return tx, restore, nil
 }
 
 // writePayload is the single place that writes ledger_payloads; it always masks.

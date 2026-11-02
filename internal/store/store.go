@@ -55,11 +55,32 @@ func EnsureLayout(home string) error {
 // DBPath returns the database file path under home.
 func DBPath(home string) string { return filepath.Join(home, "forge.db") }
 
+// ErrDBIsDirectory marks a forge.db location that holds a directory. It is not
+// corruption: the path is simply taken, so every opener (CLI, gateway, history,
+// doctor) reports it the same way instead of "corrupt?" (TASK-0020 AC-7).
+var ErrDBIsDirectory = errors.New("forge.db 위치에 파일이 아니라 디렉터리가 있습니다 (손상이 아닙니다)")
+
+// CheckDBLocation returns an error wrapping ErrDBIsDirectory when path is a
+// directory, with the way out. A missing path or a regular file is nil (other stat
+// errors are left to the opener).
+func CheckDBLocation(path string) error {
+	if path == ":memory:" {
+		return nil
+	}
+	if fi, err := os.Stat(path); err == nil && fi.IsDir() {
+		return fmt.Errorf("%w: %q. 디렉터리를 다른 이름으로 옮긴 뒤 forge init 을 실행하세요 (mv %q %q && forge init); 비어 있지 않다면 먼저 내용을 확인하세요", ErrDBIsDirectory, path, path, path+".moved")
+	}
+	return nil
+}
+
 // CheckReadable opens an existing database file read-only and runs one query
 // against it. It creates and changes nothing (no directories, no -wal/-shm
 // files, no migrations), so callers can refuse a corrupt or unreadable database
 // before any other side effect.
 func CheckReadable(ctx context.Context, path string) error {
+	if err := CheckDBLocation(path); err != nil {
+		return err
+	}
 	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro")
 	if err != nil {
 		return err
@@ -90,6 +111,9 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 // journal_mode=WAL and synchronous=NORMAL are applied to every connection via
 // DSN pragmas and _txlock=immediate (ADR-F0001 D1). In-memory databases stay in journal_mode=memory.
 func OpenRaw(path string) (*sql.DB, error) {
+	if err := CheckDBLocation(path); err != nil {
+		return nil, err
+	}
 	q := url.Values{}
 	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", "busy_timeout(5000)")
@@ -306,7 +330,7 @@ func OpenReadOnly(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	if fi.IsDir() {
-		return nil, fmt.Errorf("%s 가 파일이 아니라 디렉터리입니다", path)
+		return nil, CheckDBLocation(path)
 	}
 	q := url.Values{}
 	q.Set("mode", "ro")

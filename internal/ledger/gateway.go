@@ -135,3 +135,31 @@ func sanitizeClass(s string) string {
 	}
 	return "other"
 }
+
+// PruneGatewayMisses is the cross-session retention of the gateway's unattributed
+// miss rows (TASK-0020 AC-3): a gateway that restarts in a loop starts a new
+// session (and a new 100-row budget) every time, so the rows would otherwise grow
+// without limit. It deletes all but the newest keep rows of
+//
+//	source='gateway', found=0, error_class='not_found', session 'gw-...' and
+//	(kind='tool' with no registered tool, or kind='mcp')
+//
+// i.e. names that matched nothing registered and misses of registered servers.
+// Rows of registered custom tools (tool_id set), hidden_by_profile rows (found=1),
+// hook rows and every row with a real session are never touched. It returns the
+// number of rows deleted.
+func (r *SQLite) PruneGatewayMisses(ctx context.Context, keep int) (int64, error) {
+	if keep < 0 {
+		keep = 0
+	}
+	res, err := r.DB.ExecContext(ctx, `
+DELETE FROM ledger WHERE id IN (
+  SELECT id FROM ledger
+  WHERE source='gateway' AND found=0 AND error_class='not_found' AND substr(session_id,1,3)=?
+    AND ((kind='tool' AND tool_id IS NULL) OR kind='mcp')
+  ORDER BY id DESC LIMIT -1 OFFSET ?)`, GatewaySessionPrefix, keep)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

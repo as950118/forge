@@ -33,7 +33,7 @@ func mcpCmd() *cobra.Command {
 	var project bool
 	cmd := &cobra.Command{
 		Use:   "mcp",
-		Short: "Manage MCP servers (add|list|show|remove|refresh|approve|pin|enable|disable|expose|serve)",
+		Short: "Manage MCP servers (add|list|show|remove|refresh|approve|pin|allow-private|enable|disable|expose|serve)",
 		PersistentPreRunE: func(*cobra.Command, []string) error {
 			if project {
 				// TODO(project-scope): see mcp.ScopeGlobal.
@@ -44,7 +44,7 @@ func mcpCmd() *cobra.Command {
 	}
 	cmd.PersistentFlags().BoolVar(&project, "project", false, "프로젝트 범위 (미지원)")
 	cmd.AddCommand(
-		mcpAddCmd(), mcpListCmd(), mcpShowCmd(), mcpRemoveCmd(), mcpRefreshCmd(), mcpApproveCmd(), mcpPinCmd(),
+		mcpAddCmd(), mcpListCmd(), mcpShowCmd(), mcpRemoveCmd(), mcpRefreshCmd(), mcpApproveCmd(), mcpPinCmd(), mcpAllowPrivateCmd(),
 		mcpToggleCmd("enable", true), mcpToggleCmd("disable", false), mcpExposeCmd(),
 		mcpServeCmd(),
 	)
@@ -249,16 +249,18 @@ func mcpShowCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 			if asJSON {
-				return writeJSON(out, i)
+				return writeJSON(out, i) // structure kept; terminal-active characters become \uXXXX escapes
 			}
-			fmt.Fprintf(out, "이름:       %s\n범위:       %s\n전송:       %s\n활성:       %s\n", i.Name, i.Scope, i.Transport, yesNo(i.Enabled))
+			// Every stored text below can come from the server or the registrant: escape it for the terminal.
+			sd := func(s string, max int) string { return textsafe.Display(s, max) }
+			fmt.Fprintf(out, "이름:       %s\n범위:       %s\n전송:       %s\n활성:       %s\n", sd(i.Name, 200), sd(i.Scope, 40), sd(i.Transport, 40), yesNo(i.Enabled))
 			if i.Transport == mcp.TransportStdio {
-				fmt.Fprintf(out, "명령:       %s\n", target(*i))
+				fmt.Fprintf(out, "명령:       %s\n", sd(target(*i), 2000))
 				if i.Cwd != "" {
-					fmt.Fprintf(out, "cwd:        %s\n", i.Cwd)
+					fmt.Fprintf(out, "cwd:        %s\n", sd(i.Cwd, 1000))
 				}
 			} else {
-				fmt.Fprintf(out, "URL:        %s\n", i.URL)
+				fmt.Fprintf(out, "URL:        %s\n", sd(i.URL, 2000))
 			}
 			if i.TimeoutMS > 0 {
 				fmt.Fprintf(out, "타임아웃:   %dms\n", i.TimeoutMS)
@@ -270,26 +272,29 @@ func mcpShowCmd() *cobra.Command {
 			sort.Strings(clients)
 			var ex []string
 			for _, c := range clients {
-				ex = append(ex, c+"="+i.Exposure[c])
+				ex = append(ex, sd(c, 40)+"="+sd(i.Exposure[c], 40))
 			}
 			fmt.Fprintf(out, "노출:       %s\n", strings.Join(ex, ", "))
-			fmt.Fprintf(out, "도구 고정:  %s\n", map[bool]string{true: "enforce 켜짐 (게이트웨이는 승인된 정의와 해시가 같은 도구만 노출)", false: "enforce 꺼짐 (forge mcp pin " + shq(i.Name) + " --enforce)"}[i.Enforce])
+			fmt.Fprintf(out, "도구 고정:  %s\n", map[bool]string{true: "enforce 켜짐 (게이트웨이는 승인된 정의와 해시가 같은 도구만 노출)", false: "enforce 꺼짐 (forge mcp pin " + shq(sd(i.Name, 200)) + " --enforce)"}[i.Enforce])
+			if i.Transport != mcp.TransportStdio {
+				fmt.Fprintf(out, "사설 주소:  %s\n", map[bool]string{true: "허용됨 (forge mcp allow-private " + shq(sd(i.Name, 200)) + " --revoke 로 해제; 링크 로컬·메타데이터는 계속 차단)", false: "이름이 사설/루프백 주소로 해석되면 연결 차단 (localhost·IP 리터럴 URL 은 허용; 사내망 서버는 forge mcp allow-private " + shq(sd(i.Name, 200)) + ")"}[i.AllowPrivate])
+			}
 			if len(i.Values) > 0 {
 				fmt.Fprintln(out, "\n값 (참조만 표시, 비밀 값은 저장되지 않음):")
 				for _, v := range i.Values {
-					fmt.Fprintf(out, "  %-6s %s = %s  [%s]\n", v.Slot, v.Key, v.Display, v.RefType)
+					fmt.Fprintf(out, "  %-6s %s = %s  [%s]\n", sd(v.Slot, 20), sd(v.Key, 200), sd(v.Display, 500), sd(v.RefType, 20))
 				}
 			}
 			fmt.Fprintln(out)
 			if d := i.Discovery; d == nil {
-				fmt.Fprintf(out, "발견:       아직 없음 (forge mcp refresh %s)\n", i.Name)
+				fmt.Fprintf(out, "발견:       아직 없음 (forge mcp refresh %s)\n", shq(sd(i.Name, 200)))
 			} else {
 				fmt.Fprintf(out, "발견:       %s (%s)\n", discoveryLabel(i), time.UnixMilli(d.LastAttemptAt).Local().Format("2006-01-02 15:04:05"))
 				if d.ServerName != "" {
-					fmt.Fprintf(out, "서버 정보:  %s %s (protocol %s)\n", d.ServerName, d.ServerVersion, d.ProtocolVersion)
+					fmt.Fprintf(out, "서버 정보:  %s %s (protocol %s)\n", sd(d.ServerName, 200), sd(d.ServerVersion, 100), sd(d.ProtocolVersion, 40))
 				}
 				if !d.OK {
-					fmt.Fprintf(out, "마지막 오류: %s\n", d.Error)
+					fmt.Fprintf(out, "마지막 오류: %s\n", sd(d.Error, 2000))
 					if h := mcp.Hint(mcp.ErrorClassOf(d.Error), d.Error); h != "" {
 						fmt.Fprintf(out, "해결 안내:  %s\n", h)
 					}
@@ -548,7 +553,10 @@ func mcpServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if st, err := os.Stat(store.DBPath(home)); err != nil || st.IsDir() {
+			if err := store.CheckDBLocation(store.DBPath(home)); err != nil {
+				return err
+			}
+			if _, err := os.Stat(store.DBPath(home)); err != nil {
 				return errors.New("Forge 저장소가 초기화되지 않았습니다 (" + store.DBPath(home) + "). forge init 을 먼저 실행하세요 (FORGE_HOME 을 쓰는 경우 클라이언트 설정의 env 에 같은 값을 지정했는지 확인)")
 			}
 			// Validate the database before anything is created: a corrupt forge.db

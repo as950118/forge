@@ -70,10 +70,13 @@ type Info struct {
 	Discovery *Discovery        `json:"discovery,omitempty"`
 	ToolCount int               `json:"tool_count"`
 	// Enforce: the gateway exposes only approved, unchanged tools (settings mcp.enforce.<server>).
-	Enforce   bool   `json:"enforce_pinned"`
-	Tools     []Tool `json:"tools,omitempty"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
+	Enforce bool `json:"enforce_pinned"`
+	// AllowPrivate: a remote (http/sse) server may resolve to loopback/private addresses
+	// (settings mcp.allow_private.<server>; link-local and metadata addresses stay blocked).
+	AllowPrivate bool   `json:"allow_private,omitempty"`
+	Tools        []Tool `json:"tools,omitempty"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
 }
 
 // Add registers a validated server definition in one write transaction.
@@ -243,6 +246,13 @@ func (r *Registry) fill(ctx context.Context, id int64, i *Info, detail bool) err
 	var ev string
 	if err := r.DB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, enforceKey(i.Name)).Scan(&ev); err == nil {
 		i.Enforce = ev == "1"
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	var apv string
+	if err := r.DB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, allowPrivateKey(i.Name)).Scan(&apv); err == nil {
+		i.AllowPrivate = apv == "1"
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -425,6 +435,9 @@ func (r *Registry) Remove(ctx context.Context, name string) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, enforceKey(name)); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, allowPrivateKey(name)); err != nil {
 		return err
 	}
 	return tx.Commit()

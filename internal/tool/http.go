@@ -9,65 +9,21 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/heonjinjeong/forge/internal/netsafe"
 )
 
 // ssrfError is returned by the dialer when a resolved address is not allowed.
-type ssrfError struct {
-	host string
-	ip   net.IP
-}
+type ssrfError = netsafe.BlockedError
 
-func (e *ssrfError) Error() string {
-	return fmt.Sprintf("SSRF 방어: %s (%s) 는 허용되지 않는 주소입니다 (사설/루프백/링크로컬/메타데이터). 사설망은 allow_private 정책으로 명시 허용해야 하며 링크로컬·메타데이터는 항상 차단됩니다", e.host, e.ip)
-}
-
-func mustPrefixes(ss ...string) []netip.Prefix {
-	var out []netip.Prefix
-	for _, s := range ss {
-		out = append(out, netip.MustParsePrefix(s))
-	}
-	return out
-}
-
-var (
-	// always blocked, even with allow_private
-	alwaysBlocked = mustPrefixes("0.0.0.0/8", "169.254.0.0/16", "224.0.0.0/4", "240.0.0.0/4",
-		"fe80::/10", "ff00::/8", "fd00:ec2::/32", "100.100.100.200/32", "::/128")
-	// blocked unless allow_private
-	privateBlocked = mustPrefixes("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
-		"192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24",
-		"::1/128", "fc00::/7", "64:ff9b::/96", "2002::/16", "2001:db8::/32")
-)
-
-// ipBlocked reports whether connecting to ip is forbidden by the SSRF policy.
-func ipBlocked(ip net.IP, allowPrivate bool) bool {
-	a, ok := netip.AddrFromSlice(ip)
-	if !ok {
-		return true
-	}
-	a = a.Unmap().WithZone("")
-	for _, p := range alwaysBlocked {
-		if p.Contains(a) {
-			return true
-		}
-	}
-	if allowPrivate {
-		return false
-	}
-	for _, p := range privateBlocked {
-		if p.Contains(a) {
-			return true
-		}
-	}
-	return a.IsLoopback() || a.IsPrivate()
-}
+// ipBlocked reports whether connecting to ip is forbidden by the SSRF policy
+// (internal/netsafe: shared with the remote MCP transports).
+func ipBlocked(ip net.IP, allowPrivate bool) bool { return netsafe.Blocked(ip, allowPrivate) }
 
 type header struct{ key, value, shown string }
 
@@ -175,52 +131,10 @@ func stripDefinitionHeaders(orig, next *url.URL) bool {
 	return !strings.EqualFold(next.Host, orig.Host) || !strings.EqualFold(next.Scheme, orig.Scheme)
 }
 
-func defaultLookup(ctx context.Context, host string) ([]net.IP, error) {
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]net.IP, 0, len(addrs))
-	for _, a := range addrs {
-		out = append(out, a.IP)
-	}
-	return out, nil
-}
-
 // safeDialContext resolves the host itself and validates every address at
 // connect time (no DNS rebinding window: the validated IP is the one dialed).
 func safeDialContext(allowPrivate bool, lookup func(context.Context, string) ([]net.IP, error)) func(context.Context, string, string) (net.Conn, error) {
-	if lookup == nil {
-		lookup = defaultLookup
-	}
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-		ips, err := lookup(ctx, host)
-		if err != nil {
-			return nil, err
-		}
-		if len(ips) == 0 {
-			return nil, fmt.Errorf("호스트 %s 를 해석할 수 없습니다", host)
-		}
-		for _, ip := range ips {
-			if ipBlocked(ip, allowPrivate) {
-				return nil, &ssrfError{host: host, ip: ip}
-			}
-		}
-		d := net.Dialer{Timeout: 10 * time.Second}
-		var last error
-		for _, ip := range ips {
-			c, err := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-			if err == nil {
-				return c, nil
-			}
-			last = err
-		}
-		return nil, last
-	}
+	return netsafe.DialContext(allowPrivate, lookup)
 }
 
 // testTLSConfig is nil in production (system roots). Tests set it to trust an

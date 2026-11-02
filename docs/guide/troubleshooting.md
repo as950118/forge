@@ -119,6 +119,8 @@ forge sync --restore latest --force
 
 `사용자 확인이 필요한 도구입니다 (confirm=ask). 이 클라이언트는 확인 요청(elicitation)을 지원하지 않아 실행하지 않았습니다` 는 클라이언트가 elicitation 을 광고하지 않아 안전하게 거부한 것입니다. `forge tool test <이름>` 으로 직접 실행하거나, 위험을 이해한 도구에 한해 `forge tool add ... --confirm none --replace` 로 정책을 바꿉니다. OpenCode 의 elicitation 지원은 확인하지 못했습니다(미검증).
 
+`사용자 확인이 취소되어 도구를 실행하지 않았습니다` 는 클라이언트가 확인 요청을 광고했지만 사용자에게 보일 UI 가 없어(예: Claude Code 의 `claude -p`) 자동으로 취소한 경우입니다. Claude Code 는 `Elicitation` hook 으로 승인하게 할 수 있습니다(`docs/clients/claude-code.md` §6). 기본값(`confirm=ask`)은 안전을 위해 바꾸지 않았고, `forge tool add` 가 등록 때 같은 해결 방법을 안내합니다. 코드 실행형 프로그램은 `--confirm none` 에 더해 `--yes-code-exec` 가 필요합니다.
+
 ### 평문 비밀 거부, MCP 서버에 환경변수가 안 보임
 
 - `비밀로 보이는 키에는 literal 값을 저장할 수 없습니다`: `--env API_KEY='${API_KEY}'` 처럼 환경변수 참조로 등록하세요(셸이 확장하지 않도록 작은따옴표). 우회 옵션은 없습니다.
@@ -142,6 +144,12 @@ forge sync --restore latest --force
 ### `forge mcp serve` 가 바로 종료됨
 
 저장소(`$FORGE_HOME` 또는 `~/.forge` 의 `forge.db`)가 없으면 홈을 만들지 않고 `forge init 을 먼저 실행하세요` 를 stderr 에 출력하고 종료 코드 1 로 끝납니다. 클라이언트가 게이트웨이를 띄울 때 `FORGE_HOME` 이 다른 값이면 같은 일이 생깁니다(설정 파일의 `env` 에 `FORGE_HOME` 지정). 디버그 로그는 `FORGE_GATEWAY_DEBUG=1` 일 때만 stderr 로 나옵니다.
+
+`forge.db` 위치에 파일이 아니라 디렉터리가 있으면 "손상" 이 아니라 "forge.db 위치에 파일이 아니라 디렉터리가 있습니다 (손상이 아닙니다)" 와 옮기는 방법(`mv <경로> <경로>.moved && forge init`)이 출력됩니다. `forge doctor` 도 같은 상황을 따로 알립니다.
+
+### 원격 MCP 서버가 `blocked_address` 로 실패함
+
+원격(http/sse) MCP 서버는 연결 시점에 주소를 검사합니다. 링크 로컬·클라우드 메타데이터 주소(169.254.x.x 등)는 항상 차단되고, 이름이 사설/루프백 주소(사내망)로 해석되는 서버는 기본으로 차단됩니다. URL 에 `localhost` 나 `127.0.0.1` 을 직접 쓴 로컬 개발 서버는 그대로 동작합니다. 신뢰하는 사내망 서버라면 `forge mcp allow-private <서버>` 로 허용하고(`--revoke` 로 해제), `forge mcp show <서버>` 에서 상태를 확인합니다. 환경변수 프록시를 쓰는 연결은 프록시가 대상에 접속하므로 이 검사가 적용되지 않습니다.
 
 ### 관찰된 동작: 프로필에서 숨긴 도구 호출이 `history misses` 에 나타남
 

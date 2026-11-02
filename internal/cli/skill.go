@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/heonjinjeong/forge/internal/skill"
+	"github.com/heonjinjeong/forge/internal/textsafe"
 )
 
 func skillCmd() *cobra.Command {
@@ -40,10 +42,56 @@ func skillCmd() *cobra.Command {
 	return cmd
 }
 
+// writeJSON prints v as indented JSON. The structure and every value are kept; only
+// characters a terminal would act on (ESC, bidi overrides such as U+202E, zero-width
+// and other format characters; textsafe.NeedsEscape) are written as \uXXXX escapes,
+// which JSON parsers read back as the same characters. encoding/json already escapes
+// C0 controls and U+2028/2029 but passes U+202E and the C1 controls through, so
+// `forge ... --json` piped to a terminal could otherwise reorder or hide text
+// (TASK-0020 AC-8).
 func writeJSON(w io.Writer, v any) error {
-	enc := json.NewEncoder(w)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
-	return enc.Encode(v)
+	if err := enc.Encode(v); err != nil {
+		return err
+	}
+	_, err := w.Write(escapeJSONControls(buf.Bytes()))
+	return err
+}
+
+// escapeJSONControls rewrites terminal-active runes of already valid JSON text as
+// \uXXXX (a surrogate pair above U+FFFF). Such runes can only occur inside strings.
+func escapeJSONControls(b []byte) []byte {
+	clean := true
+	for _, r := range string(b) {
+		if r == utf8.RuneError || textsafe.NeedsEscape(r) && r != '\n' && r != '\t' && r != '\r' {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return b
+	}
+	var out bytes.Buffer
+	for i := 0; i < len(b); {
+		r, size := utf8.DecodeRune(b[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			out.WriteString(`\ufffd`)
+		case textsafe.NeedsEscape(r) && r != '\n' && r != '\t' && r != '\r':
+			if r > 0xffff {
+				r -= 0x10000
+				fmt.Fprintf(&out, `\u%04x\u%04x`, 0xd800+(r>>10), 0xdc00+(r&0x3ff))
+			} else {
+				fmt.Fprintf(&out, `\u%04x`, r)
+			}
+		default:
+			out.Write(b[i : i+size])
+		}
+		i += size
+	}
+	return out.Bytes()
 }
 
 func homeTmp(home string) string { return filepath.Join(home, "tmp") }

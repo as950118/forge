@@ -857,3 +857,30 @@ func TestMaskDiscoveredNameAndSchema(t *testing.T) {
 		t.Errorf("longest secret should be replaced whole: %q", d.tools[0].Name)
 	}
 }
+
+// TASK-0020 AC-1: a scheme-less proxy value with userinfo ("u:pw@proxy:1") is a
+// credential too; plain host:port values and unrelated '@' values pass.
+func TestMinimalEnvDropsSchemelessProxyCredentials(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", " u:pw@proxy.example:1") // leading blank is trimmed
+	t.Setenv("https_proxy", "onlyuser@proxy.example:1")
+	t.Setenv("ALL_PROXY", "socks5://proxy.example:1080")
+	t.Setenv("HTTP_PROXY", "proxy.example:3128")
+	t.Setenv("NO_PROXY", "a@b,localhost")
+	t.Setenv("npm_config_registry", "tok@registry.example/path")
+	t.Setenv("NVM_DIR", "/home/a@b/.nvm") // a path: '@' is not userinfo
+	env := strings.Join(MinimalEnv(), "\n")
+	for _, bad := range []string{"HTTPS_PROXY=", "https_proxy=", "u:pw", "onlyuser", "npm_config_registry=", "tok@"} {
+		if strings.Contains(env, bad) {
+			t.Errorf("%q passed through MinimalEnv:\n%s", bad, env)
+		}
+	}
+	for _, good := range []string{"ALL_PROXY=socks5://proxy.example:1080", "HTTP_PROXY=proxy.example:3128", "NO_PROXY=a@b,localhost", "NVM_DIR=/home/a@b/.nvm"} {
+		if !strings.Contains(env, good) {
+			t.Errorf("%q wrongly dropped:\n%s", good, env)
+		}
+	}
+	dropped := strings.Join(MinimalEnvDropped(), ",")
+	if !strings.Contains(dropped, "HTTPS_PROXY") || strings.Contains(dropped, "pw") {
+		t.Errorf("dropped names: %s", dropped)
+	}
+}
