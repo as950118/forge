@@ -53,7 +53,7 @@ func toolAddCmd() *cobra.Command {
 		envs, headers, allow                                                            []string
 		timeout                                                                         time.Duration
 		maxOut, maxRedirects                                                            int
-		allowDash, allowVarSub, allowPrivate, allowHTTP, replace, asJSON                bool
+		allowDash, allowVarSub, allowPrivate, allowHTTP, replace, asJSON, yesCodeExec   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "add <name> [flags] [-- <command> [args...]]",
@@ -69,7 +69,11 @@ func toolAddCmd() *cobra.Command {
 
 비밀은 --env KEY='${ENV}' / --header Name='${ENV}' 참조로만 저장합니다 (평문 거부, 우회 옵션 없음).
 기본 정책: 타임아웃 30s, 환경변수 최소화(PATH 등 + 명시한 ${ENV} 만), 출력 64KiB, https 만, 사설/루프백/메타데이터 IP 차단.
-같은 이름을 다시 등록하려면 --replace (revision +1).`,
+같은 이름을 다시 등록하려면 --replace (revision +1).
+
+코드 실행형 프로그램(sqlite3, npm/npx/pnpm/yarn, uv/uvx/pipx, swift, java/jshell, irb, go run, cargo run, open 등; 이름 기반 휴리스틱)은
+risk=code-exec 로 분류되어 등록 시 경고가 나오고, 게이트웨이는 confirm=none 이어도 호출마다 사용자 확인(ask)을 요구합니다.
+--confirm none 을 유지하려면 --yes-code-exec 로 위험을 명시 승인해야 합니다 (docs/security.md).`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, rest := args[0], args[1:]
@@ -78,7 +82,7 @@ func toolAddCmd() *cobra.Command {
 			}
 			def := tool.Definition{Name: name, Description: desc, Kind: kind, Interpreter: interp, Method: method, URL: url, BodyTemplate: body}
 			def.Policy = tool.Policy{TimeoutMS: int(timeout / time.Millisecond), Confirm: confirm, WorkingDir: cwd, Allow: allow,
-				AllowLeadingDash: allowDash, AllowVarSubcommand: allowVarSub, AllowPrivate: allowPrivate, AllowHTTP: allowHTTP, MaxOutputBytes: maxOut, MaxRedirects: maxRedirects}
+				AllowLeadingDash: allowDash, AllowVarSubcommand: allowVarSub, AllowPrivate: allowPrivate, AllowHTTP: allowHTTP, AckCodeExec: yesCodeExec, MaxOutputBytes: maxOut, MaxRedirects: maxRedirects}
 			if timeout < 0 || (timeout > 0 && timeout < time.Millisecond) {
 				return errors.New("--timeout 은 1ms 이상이어야 합니다")
 			}
@@ -174,6 +178,9 @@ func toolAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if w := tool.CodeExecWarning(saved); w != "" {
+				fmt.Fprintln(cmd.ErrOrStderr(), w)
+			}
 			if asJSON {
 				got, err := reg.Get(cmd.Context(), name)
 				if err != nil {
@@ -205,7 +212,8 @@ func toolAddCmd() *cobra.Command {
 	f.StringVar(&cwd, "cwd", "", "작업 디렉터리 루트 (기본: 실행 시 현재 디렉터리). 이 아래로만 실행 가능")
 	f.StringArrayVar(&allow, "allow", nil, "allowlist: command=실행 파일 이름/절대경로, http=호스트(*.example.com), script=추가 인터프리터")
 	f.BoolVar(&allowDash, "allow-dash", false, "치환된 값이 '-' 로 시작하는 것을 허용 (옵션 주입 위험)")
-	f.BoolVar(&allowVarSub, "allow-var-subcommand", false, "command: argv[1](프로그램/서브커맨드 자리)에 {{변수}} 허용 (기본 거부; 데이터는 `cat -- {{file}}` 처럼 argv[2:] 에)")
+	f.BoolVar(&allowVarSub, "allow-var-subcommand", false, "command: argv[1](프로그램/서브커맨드 자리)에 {{변수}} 허용 (기본 거부; 데이터는 'cat -- {{file}}' 처럼 argv[2:] 에)")
+	f.BoolVar(&yesCodeExec, "yes-code-exec", false, "command: 코드 실행형 프로그램(sqlite3, npm, uv, go run 등; risk=code-exec)을 --confirm none 으로 등록하는 위험을 이해했다는 명시 확인 (없으면 --confirm none 등록 거부, 게이트웨이는 ask 강제)")
 	f.BoolVar(&allowPrivate, "allow-private", false, "http: 사설/루프백 주소 허용 (링크로컬·메타데이터는 항상 차단)")
 	f.BoolVar(&allowHTTP, "allow-http", false, "http: 평문 http:// 허용")
 	f.IntVar(&maxOut, "max-output", 0, "stdout/stderr(응답) 각각의 최대 바이트 (기본 65536, 최대 1048576)")
@@ -253,9 +261,9 @@ func toolListCmd() *cobra.Command {
 				return nil
 			}
 			tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tKIND\tENABLED\tREV\tCONFIRM\tTARGET")
+			fmt.Fprintln(tw, "NAME\tKIND\tENABLED\tREV\tCONFIRM\tRISK\tTARGET")
 			for _, it := range items {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", it.Name, it.Kind, yesNo(it.Enabled), it.Revision, it.Policy.Confirm, truncate(toolTarget(it), 60))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\n", it.Name, it.Kind, yesNo(it.Enabled), it.Revision, confirmShown(it), orDefault(it.Risk, "-"), truncate(toolTarget(it), 60))
 			}
 			return tw.Flush()
 		},
@@ -290,7 +298,13 @@ func toolShowCmd() *cobra.Command {
 			if d.BodyTemplate != "" {
 				fmt.Fprintf(out, "본문:       %s\n", d.BodyTemplate)
 			}
-			fmt.Fprintf(out, "\n정책:\n  timeout=%dms confirm=%s max_output=%dB", p.TimeoutMS, p.Confirm, p.MaxOutputBytes)
+			if d.Risk != "" {
+				fmt.Fprintf(out, "위험:       %s (%s)\n", d.Risk, d.CodeExecBinary())
+			}
+			fmt.Fprintf(out, "\n정책:\n  timeout=%dms confirm=%s max_output=%dB", p.TimeoutMS, confirmShown(*d), p.MaxOutputBytes)
+			if p.AckCodeExec {
+				fmt.Fprint(out, " ack_code_exec=yes")
+			}
 			if d.Kind == tool.KindHTTP {
 				fmt.Fprintf(out, " max_redirects=%d allow_private=%s allow_http=%s", p.MaxRedirects, yesNo(p.AllowPrivate), yesNo(p.AllowHTTP))
 			} else {
@@ -309,6 +323,15 @@ func toolShowCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON 출력")
 	return cmd
+}
+
+// confirmShown is the stored confirm, marked when the gateway enforces ask
+// instead (code-exec without acknowledgement).
+func confirmShown(d tool.Definition) string {
+	if d.ForcedAsk() {
+		return d.Policy.Confirm + "→ask(강제)"
+	}
+	return d.Policy.Confirm
 }
 
 func orDefault(s, d string) string {

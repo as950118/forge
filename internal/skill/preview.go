@@ -36,6 +36,12 @@ const (
 	maxExample      = 80
 	maxURLs         = 10
 	probeBytes      = 8192
+
+	// Script content preview (TASK-0018 AC-5).
+	maxHeadFiles = 5        // executables whose first lines are shown (highest risk first)
+	maxHeadLines = 10       // lines per file
+	maxHeadWidth = 160      // bytes per shown line (after escaping)
+	scanBytes    = 64 << 10 // bytes of an executable that the pattern scan reads
 )
 
 // RiskyFrontmatterKeys are SKILL.md frontmatter fields that change what the
@@ -66,6 +72,12 @@ type ExecItem struct {
 	SHA256      string   `json:"sha256"`
 	Interpreter string   `json:"interpreter,omitempty"`
 	Reasons     []string `json:"reasons"`
+	// RiskPatterns are the heuristic findings in the first scanBytes of the file
+	// (kind names of scriptPatterns); Head is the first lines of the file for the
+	// highest-risk files (control and invisible characters escaped, width capped).
+	RiskPatterns []string `json:"risk_patterns,omitempty"`
+	Head         []string `json:"head,omitempty"`
+	HeadMore     bool     `json:"head_more,omitempty"` // the file has more lines than shown
 }
 
 // PatternHit is one heuristic finding in SKILL.md.
@@ -110,6 +122,7 @@ type Preview struct {
 	Frontmatter  []FMItem     `json:"frontmatter"`
 	Executables  []ExecItem   `json:"executables"`
 	ExecMore     int          `json:"executables_more,omitempty"`
+	ExecRisky    int          `json:"executables_risky,omitempty"` // executables (all, not only the shown) with a risk pattern
 	Hidden       []string     `json:"hidden_files"`
 	HiddenMore   int          `json:"hidden_files_more,omitempty"`
 	Binary       []string     `json:"binary_files"`
@@ -130,7 +143,7 @@ type Installed struct {
 }
 
 // HeuristicNote must accompany every pattern list.
-const HeuristicNote = "위험 패턴은 SKILL.md 텍스트에 대한 단순 휴리스틱입니다. 정확한 탐지가 아니며, 아무것도 발견되지 않아도 안전하다는 뜻이 아닙니다. 스크립트 내용은 검사하지 않습니다."
+const HeuristicNote = "위험 패턴은 SKILL.md 와 실행 가능한 파일(앞 64KiB)의 텍스트에 대한 단순 휴리스틱입니다. 정확한 탐지가 아니며, 난독화·분할·인코딩된 명령은 놓치고, 아무것도 발견되지 않아도 안전하다는 뜻이 아닙니다. 보여 주는 첫 줄들은 파일의 일부일 뿐이니 실행 가능한 파일은 직접 읽어 보세요."
 
 func safe(s string, max int) string {
 	return textsafe.Display(strings.Join(strings.Fields(s), " "), max)
@@ -271,6 +284,15 @@ var riskPatterns = []patt{
 	{"ssh", regexp.MustCompile(`\bssh\b`)},
 	{"nc (netcat)", regexp.MustCompile(`\bnc\s`)},
 }
+
+// scriptPatterns are the riskPatterns plus patterns that only make sense in
+// scripts (network and process APIs of common interpreters). Same limits:
+// simple regular expressions over text, trivially evaded by obfuscation.
+var scriptPatterns = append(append([]patt{}, riskPatterns...),
+	patt{"네트워크 호출 (코드)", regexp.MustCompile(`\b(?:requests\.(?:get|post|put|request)|urllib|http\.client|socket\.|fetch\(|XMLHttpRequest|net\.connect|Net::HTTP|open-uri)|/dev/tcp/`)},
+	patt{"프로세스·명령 실행 (코드)", regexp.MustCompile(`\b(?:os\.system|subprocess|child_process|Runtime\.getRuntime|popen|exec\.Command)\b|\bsystem\(|\bexec\(`)},
+	patt{"환경변수·자격 증명 파일 접근", regexp.MustCompile(`\.ssh/|\.aws/|\.netrc|\.npmrc|\.env\b|id_rsa|credentials\.json`)},
+)
 
 var (
 	urlRe  = regexp.MustCompile(`https?://[^\s<>)"'\]]+`)
@@ -424,6 +446,7 @@ func BuildPreview(p *Prepared, hash string, old *Installed) (*Preview, error) {
 	}
 
 	// executables, hidden, binary
+	var cands []execCand
 	for _, rel := range paths {
 		f := files[rel]
 		full := filepath.Join(p.Root, filepath.FromSlash(rel))
@@ -444,12 +467,13 @@ func BuildPreview(p *Prepared, hash string, old *Installed) (*Preview, error) {
 			}
 		}
 		if len(reasons) > 0 {
-			if len(pv.Executables) < maxPreviewList {
-				pv.Executables = append(pv.Executables, ExecItem{Path: safePath(rel), Size: f.Size, SHA256: f.SHA,
-					Interpreter: safe(interp, 120), Reasons: reasons})
-			} else {
-				pv.ExecMore++
+			it := ExecItem{Path: safePath(rel), Size: f.Size, SHA256: f.SHA, Interpreter: safe(interp, 120), Reasons: reasons}
+			var lines []string
+			var more bool
+			if !looksBinary(head) {
+				it.RiskPatterns, lines, more = scanScript(full)
 			}
+			cands = append(cands, execCand{item: it, rel: rel, score: execScore(f.Exec, sbang(head), reasons, len(it.RiskPatterns)), lines: lines, more: more})
 		}
 		for _, part := range strings.Split(rel, "/") {
 			if strings.HasPrefix(part, ".") {
@@ -469,6 +493,8 @@ func BuildPreview(p *Prepared, hash string, old *Installed) (*Preview, error) {
 			}
 		}
 	}
+
+	pv.Executables, pv.ExecMore, pv.ExecRisky = rankExecutables(cands)
 
 	// SKILL.md heuristics
 	if b, err := os.ReadFile(filepath.Join(p.Root, "SKILL.md")); err == nil && len(b) <= MaxSkillMDSize {
@@ -500,7 +526,11 @@ func BuildPreview(p *Prepared, hash string, old *Installed) (*Preview, error) {
 		pv.Warnings = append(pv.Warnings, "클라이언트 동작을 바꾸는 frontmatter 필드: "+strings.Join(other, ", "))
 	}
 	if n := len(pv.Executables) + pv.ExecMore; n > 0 {
-		pv.Warnings = append(pv.Warnings, fmt.Sprintf("실행 가능한 파일 %d개 (스크립트 내용은 검사하지 않음 — 직접 읽어 보세요)", n))
+		w := fmt.Sprintf("실행 가능한 파일 %d개 (위험도 순 상위 %d개만 표시, 첫 줄·위험 패턴은 휴리스틱 — 직접 읽어 보세요)", n, len(pv.Executables))
+		if pv.ExecRisky > 0 {
+			w = fmt.Sprintf("실행 가능한 파일 %d개 중 위험 패턴이 있는 파일 %d개 (위험도 순 상위 %d개만 표시, 휴리스틱 — 직접 읽어 보세요)", n, pv.ExecRisky, len(pv.Executables))
+		}
+		pv.Warnings = append(pv.Warnings, w)
 	}
 	switch pv.RefStatus {
 	case "unpinned":
@@ -526,6 +556,94 @@ func BuildPreview(p *Prepared, hash string, old *Installed) (*Preview, error) {
 		}
 	}
 	return pv, nil
+}
+
+type execCand struct {
+	item  ExecItem
+	rel   string
+	score int
+	lines []string
+	more  bool // the file has more lines than lines holds
+}
+
+func sbang(head []byte) bool { return shebang(head) != "" }
+
+// execScore orders executables by how much a reader should look at them first:
+// a risk pattern outweighs everything (more distinct kinds rank higher), then
+// the exec bit, then a shebang, then the script extension alone.
+func execScore(execBit, shebang bool, reasons []string, risk int) int {
+	sc := 0
+	if risk > 0 {
+		sc += 100 + 10*risk
+	}
+	if execBit {
+		sc += 4
+	}
+	if shebang {
+		sc += 2
+	}
+	if len(reasons) > 0 && !execBit && !shebang {
+		sc++
+	}
+	return sc
+}
+
+// rankExecutables sorts by score (highest first, ties by path), keeps the top
+// maxPreviewList, attaches the first lines to the top maxHeadFiles and returns
+// how many were left out and how many of all candidates have a risk pattern.
+func rankExecutables(c []execCand) (shown []ExecItem, more, risky int) {
+	sort.SliceStable(c, func(i, j int) bool {
+		if c[i].score != c[j].score {
+			return c[i].score > c[j].score
+		}
+		return c[i].rel < c[j].rel
+	})
+	shown = []ExecItem{}
+	for i := range c {
+		if len(c[i].item.RiskPatterns) > 0 {
+			risky++
+		}
+		if i >= maxPreviewList {
+			more++
+			continue
+		}
+		it := c[i].item
+		if i < maxHeadFiles && len(c[i].lines) > 0 {
+			it.Head, it.HeadMore = c[i].lines, c[i].more
+		}
+		shown = append(shown, it)
+	}
+	return shown, more, risky
+}
+
+// scanScript reads the first scanBytes of a text file and returns the kinds of
+// scriptPatterns found and the first maxHeadLines lines, escaped for a terminal.
+func scanScript(path string) (kinds, head []string, more bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, false
+	}
+	defer f.Close()
+	buf := make([]byte, scanBytes)
+	n, _ := io.ReadFull(f, buf)
+	text := strings.ReplaceAll(string(buf[:n-trailingPartialRune(buf[:n])]), "\r\n", "\n")
+	for _, p := range scriptPatterns {
+		if p.re.MatchString(text) {
+			kinds = append(kinds, p.kind)
+		}
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for i, ln := range lines {
+		if i >= maxHeadLines {
+			more = true
+			break
+		}
+		head = append(head, textsafe.Display(ln, maxHeadWidth))
+	}
+	return kinds, head, more || n == scanBytes
 }
 
 func isExec(rel string, f fileEntry, head []byte) bool {

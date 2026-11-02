@@ -90,7 +90,11 @@ type Policy struct {
 	// cloud metadata addresses are always blocked.
 	AllowPrivate bool `json:"allow_private,omitempty"`
 	// AllowHTTP permits plain http:// (default https only).
-	AllowHTTP      bool `json:"allow_http,omitempty"`
+	AllowHTTP bool `json:"allow_http,omitempty"`
+	// AckCodeExec records that the registrant explicitly accepted running a
+	// code-exec tool (Definition.Risk) with confirm=none, i.e. without the
+	// gateway's forced confirm=ask (TASK-0018). Stored in the settings ext JSON.
+	AckCodeExec    bool `json:"ack_code_exec,omitempty"`
 	MaxOutputBytes int  `json:"max_output_bytes"`
 	MaxRedirects   int  `json:"max_redirects"`
 }
@@ -126,6 +130,10 @@ type Definition struct {
 
 	Policy Policy      `json:"policy"`
 	Values []mcp.Value `json:"values,omitempty"`
+
+	// Risk is derived, never stored: "code-exec" for a command tool whose
+	// program interprets data as code (risk.go), otherwise empty.
+	Risk string `json:"risk,omitempty"`
 
 	Enabled   bool  `json:"enabled"`
 	Revision  int   `json:"revision"`
@@ -204,6 +212,7 @@ func (d *Definition) Validate() error {
 	if err != nil {
 		return err
 	}
+	d.refreshRisk()
 	return d.validateValues()
 }
 
@@ -212,6 +221,9 @@ func (d *Definition) Validate() error {
 // expanded by Forge (no shell), so the program would receive the literal text.
 func (d *Definition) ValidateNew() error {
 	if err := d.Validate(); err != nil {
+		return err
+	}
+	if err := d.validateCodeExecAck(); err != nil {
 		return err
 	}
 	if d.Kind == KindCommand && !d.Shell {

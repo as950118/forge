@@ -25,7 +25,7 @@
 
 ## 3. 위협과 완화 (표)
 
-"테스트" 는 `go test` 로 실행되는 테스트 이름이다. 후속은 로컬에서 관리하는 후속 태스크 번호다(0017 MCP 후속, 0018 도구 위협 모델·code-exec 분류, 0019 이력 수집 후속, 0020 게이트웨이 후속·실클라이언트 검증, 0021 history 후속, 0022 sync 후속, 0023 어댑터 공통 계층, 0024 프로필·doctor 후속). **TASK-0018(code-exec 바이너리 위험 분류)은 이번 범위가 아니다 — 후속.**
+"테스트" 는 `go test` 로 실행되는 테스트 이름이다. 후속은 로컬에서 관리하는 후속 태스크 번호다(0017 MCP 후속, 0018 도구 위협 모델·code-exec 분류, 0019 이력 수집 후속, 0020 게이트웨이 후속·실클라이언트 검증, 0021 history 후속, 0022 sync 후속, 0023 어댑터 공통 계층, 0024 프로필·doctor 후속). TASK-0018(도구 실행 위협 모델, code-exec 분류, 설치 미리보기의 스크립트 내용)은 아래 "도구 실행 위협 모델과 code-exec 분류 (TASK-0018)" 절에 있다.
 
 ### 3.1 외부 스킬 가져오기
 
@@ -35,7 +35,7 @@
 | S2 | **git 인자·URL 주입** (`-u…`, `--upload-pack=`, `ext::`, `file://`, 자격증명 URL, `ssh://-oProxyCommand=x/`) | `internal/skill/git.go`: `ValidateGitURL`(https·ssh 만, 비밀번호·https 사용자 정보·쿼리·공백·`-` 로 시작하는 호스트 거부), 모든 git 호출에 `--` 구분, `GIT_ALLOW_PROTOCOL=https:ssh`, `GIT_TERMINAL_PROMPT=0`, `--ref` 는 `ValidateRef`(영문/숫자로 시작, `..`·`@`·`~`·`^`·`:`·공백·제어 문자·`.lock` 거부). 서브모듈은 가져오지 않는다(`--recurse-submodules` 미사용). 테스트: `TestPrepareGitRejectsBadURLs`, `TestValidateGitURLRejectsDashHost`, `TestExecGitRefusesFileScheme`, `TestPrepareRefValidation`, `TestExecGitCloneRefLocal`. 제품 코드는 `file://` 을 허용하지 않고, 테스트는 `allowFile` 비공개 스위치와 가짜 클로너만 쓴다 | 사용자의 전역 git 설정(`url.<base>.insteadOf`, credential helper, 프록시)은 그대로 적용된다(`GIT_CONFIG_GLOBAL` 을 비우지 않음). 서버가 보낸 내용은 클론 후 `.git` 을 버리고 복사한 트리로만 쓴다 | — |
 | S3 | **악성 SKILL.md — 프롬프트 인젝션** (본문이 모델에게 "비밀을 보내라" 등을 지시) | 설치 전 **미리보기**가 SKILL.md 를 읽게 유도하고(이름·설명·frontmatter 전체 표시), 본문의 URL·IP·`curl`/`wget`/`\| sh`/`eval`/`base64 -d`/`chmod +x`/`rm -rf`/`sudo`/`ssh`/`nc` 존재를 **휴리스틱**으로 경고(`internal/skill/preview.go`). git/zip 은 승인 필수, `--sha256` 으로 검토한 트리 고정. 테스트: `TestPreviewContents`, `TestGitAddWithoutApprovalIsRefusedAndInstallsNothing`, `TestSHA256Pin` | **본문 속 지시를 자동으로 판별할 수 없다.** 패턴 목록은 단순 정규식이라 우회가 쉽고 "발견 없음" 은 안전이 아니다. 스크립트·참조 파일 내용은 검사하지 않는다. 승인 후에는 클라이언트의 모델이 본문을 따른다 | — |
 | S4 | **frontmatter `hooks` 등 위험 필드** (`hooks`, `allowed-tools`, `disallowed-tools`, `context`, `agent`, `model`, `shell`) | 미리보기가 해당 필드를 `!` 로 강조하고 이유를 붙이며 `hooks` 는 별도 경고문을 낸다. 업데이트·재추가 시 **새로 생기거나 값이 바뀐** 위험 필드를 변경 요약에 표시. 로컬 디렉터리도 경고는 표시하되 막지는 않는다(`--strict-local` 이면 승인 필수). 테스트: `TestPreviewContents`, `TestPreviewChangeSummaryAgainstInstalled`, `TestPreviewChangedRiskyValue`, `TestLocalDirWarnsOnHooksButDoesNotBlock`, `TestStrictLocalRequiresApproval` | Forge 는 frontmatter 를 **바꾸지 않고 그대로 sync** 한다. Claude Code 공식 문서는 스킬 frontmatter 의 `hooks`·`allowed-tools` 를 지원한다고 한다(`docs/clients/claude-code.md`, `[doc]`). 실제 클라이언트가 어떻게 실행하는지는 **미검증**이다 | 0020 |
-| S5 | **스킬 스크립트** (`scripts/*.sh`, 실행 비트) | Forge 는 스킬 스크립트를 **실행하지 않는다**: 게이트웨이 `forge_skill` 은 텍스트 파일만 읽어 돌려준다(`readInside`), sync 는 복사만 한다. 미리보기가 실행 가능한 파일(실행 비트·셔뱅·스크립트 확장자)의 경로·크기·sha256·인터프리터를 표시하고, 숨김·바이너리 파일도 표시. 테스트: `TestPreviewContents`, `TestPreviewListsAreBounded` | 클라이언트의 모델이 Bash 도구로 스크립트를 실행할 수 있다(그 실행의 승인은 클라이언트 몫). 스크립트 내용은 미리보기에 나오지 않는다 | 0018 |
+| S5 | **스킬 스크립트** (`scripts/*.sh`, 실행 비트) | Forge 는 스킬 스크립트를 **실행하지 않는다**: 게이트웨이 `forge_skill` 은 텍스트 파일만 읽어 돌려준다(`readInside`), sync 는 복사만 한다. 미리보기가 실행 가능한 파일(실행 비트·셔뱅·스크립트 확장자)의 경로·크기·sha256·인터프리터를 표시하고, 숨김·바이너리 파일도 표시. **TASK-0018 AC-5**: 실행 가능한 파일을 위험도 순(위험 패턴, 실행 비트, 셔뱅, 확장자 순; 같으면 경로 순)으로 상위 30개만 보이고 나머지는 개수만 표시하며, 각 파일 앞 64KiB 의 위험 패턴 요약과 위험도 상위 5개 파일의 첫 10줄(제어·비가시 문자 이스케이프, 줄당 160바이트)을 보여 준다(아래 절 6항). 테스트: `TestPreviewContents`, `TestPreviewListsAreBounded`, `TestPreviewExecutablesAreOrderedByRisk`, `TestPreviewRiskyScriptBeyondTheLimitIsShownFirst`, `TestPreviewScriptPatternsAndHeadLines`, `TestPreviewHeadEscapesControlsAndBoundsWidth`, `TestPreviewHeadIsLimitedToTheRiskiestFiles`, `TestSkillPreviewTextShowsScriptContentByRisk` | 클라이언트의 모델이 Bash 도구로 스크립트를 실행할 수 있다(그 실행의 승인은 클라이언트 몫). 패턴 요약은 휴리스틱이고 파일의 일부(앞 64KiB, 첫 10줄)만 보인다. 난독화·분할·인코딩된 명령, 바이너리, 다른 파일을 `source`·`import` 하는 스크립트는 놓친다 | — |
 | S6 | **승인 메시지·미리보기 위조** (이름·설명·파일명·URL 의 ESC, 줄바꿈, 방향 제어 U+202E) | 미리보기의 모든 동적 문자열은 생성 시 한 번 `textsafe` 로 정화(제어·방향·제로폭 문자는 `\x1b`, `\u202e` 같은 보이는 이스케이프, 길이 상한). 텍스트와 `--json` 모두 같은 값을 쓴다. `mcp show` 의 도구 이름·설명도 정화. 테스트: `TestPreviewSanitizesHostileStrings`, `TestPreviewOutputIsTerminalSafe`, `TestPreviewHugeSkillMDRejectedBeforePreview`, `TestMCPShowSanitizesToolText`, `TestPreviewCommandLineIsShellQuoted` | 정화는 "보이게" 만든다. 사람이 이스케이프된 문자열을 읽고 판단해야 한다. 동형 문자(키릴 `а` 와 라틴 `a`)는 구분하지 않는다 | 0019 |
 | S7 | **해시 고정·변경 감지** (같은 URL 이 나중에 다른 내용을 줌) | 미리보기가 항상 **트리 sha256**(경로·실행 비트·크기·내용)을 표시, `--sha256` 불일치는 설치하지 않음(대소문자·공백 정규화, 형식 오류 거부). git 은 `--ref`: 40(64)자 커밋 해시만 "고정됨", 브랜치·태그·미지정은 "고정되지 않음" 경고. 레지스트리에 `source_uri`·`source_ref`(`<요청 ref>@<커밋>`)·`content_hash` 기록. `skill update` 는 다시 가져와 변경 요약 후 승인 시에만 **새 불변 버전** 추가(옛 버전 보존). 테스트: `TestSHA256Pin`, `TestGitRefPinning`, `TestPrepareGitRefStatus`, `TestSkillUpdateShowsChangesAndNeedsApproval`, `TestSkillUpdateGitFollowsRecordedRef`, `TestSkillUpdateRefusesRenamedSource` | 해시는 **내가 본 내용과 같다**는 것만 보장하며 내용이 안전하다는 뜻이 아니다. 해시를 복사해 오는 경로가 신뢰되어야 한다(미리보기 → 사람이 확인 → 재실행). 서버가 커밋 해시 요청에 다른 커밋을 주면 `ExecGit.CloneRef` 가 거부한다. 승인 전 가져오기(클론) 자체는 네트워크 접속이다 | — |
 | S8 | **설치 후 저장소 변조** (`~/.forge/skills/<이름>@<버전>/` 파일을 사후에 수정·추가·심볼릭 링크화) | 등록 시 스냅샷은 읽기 전용 권한. 같은 해시 검증(`skill.VerifyStore`: 가져오기 한도 안에서 재해시, 심볼릭 링크·추가 파일·실행 비트 변경도 탐지)을 **`forge skill check`**(읽기 전용, 종료 코드 1), **게이트웨이 `forge_skill`**(변조 시 제공 거부), **`forge doctor`**(`security.skills`, fail) 가 쓰고, **sync** 는 기존 `TreeHash` 교차검증으로 렌더링을 거부한다. 테스트: `TestVerifyStoreStates`, `TestVerifyStoreBoundedByImportLimits`, `TestSkillCheckDetectsStoreTampering`, `TestForgeSkillRefusesTamperedSnapshot`, `TestDoctorDetectsSkillStoreTampering`, `TestTamperedRegistrySnapshotIsRefused` | DB 의 `content_hash` 도 함께 바꾸면 탐지하지 못한다(DB 쓰기 권한자, 5.3). 검사와 사용 사이의 교체(TOCTOU)는 막지 못한다 | — |
@@ -57,7 +57,7 @@
 
 | # | 위협 | 완화책 (구현 · 테스트) | 잔여 위험·한계 | 후속 |
 |---|------|------------------------|----------------|------|
-| T1 | **커스텀 도구 명령 주입** (모델 인자가 셸·옵션으로 해석됨) | 도구는 셸 없이 argv 로 실행되고 모델 인자는 변수 위치에만 들어간다. 프로그램·서브명령 위치의 변수, 허용 목록에 없는 명령, 래퍼를 통한 우회, 심볼릭 링크 위장을 거부하고 위조된 DB 행도 실행 시 정책을 다시 검사(`internal/tool`). 인자는 JSON 스키마로 먼저 검증. 테스트: `TestWrapperAllowlistBypassBlocked`, `TestVariableInProgramOrSubcommandSlotRefused`, `TestAllowlistMustContainCommand`, `TestSymlinkDisguiseBlockedByRealBinary`, `TestTamperedDBRowsFailPolicyOnResolve`, `TestScriptStoreIntegrityAndPermissions` | **deny 목록은 심층 방어이지 샌드박스가 아니다.** 목록 밖 바이너리가 데이터를 코드로 해석하면(sqlite3 `.shell`, `npm exec`, `uv run` 등) 임의 실행이 가능하다. `--shell` 본문 해시 없음, TOCTOU, `setsid` 로 타임아웃 회피 가능성. `cat 절대경로` 로 cwd 밖 읽기 | **0018**(code-exec 위험 분류·confirm=ask 강제 — 이번 범위 아님) |
+| T1 | **커스텀 도구 명령 주입** (모델 인자가 셸·옵션으로 해석됨) | 도구는 셸 없이 argv 로 실행되고 모델 인자는 변수 위치에만 들어간다. 프로그램·서브명령 위치의 변수, 허용 목록에 없는 명령, 래퍼를 통한 우회, 심볼릭 링크 위장을 거부하고 위조된 DB 행도 실행 시 정책을 다시 검사(`internal/tool`). 인자는 JSON 스키마로 먼저 검증. 테스트: `TestWrapperAllowlistBypassBlocked`, `TestVariableInProgramOrSubcommandSlotRefused`, `TestAllowlistMustContainCommand`, `TestSymlinkDisguiseBlockedByRealBinary`, `TestTamperedDBRowsFailPolicyOnResolve`, `TestScriptStoreIntegrityAndPermissions` | **deny 목록은 심층 방어이지 샌드박스가 아니다.** 목록 밖 바이너리가 데이터를 코드로 해석하면(sqlite3 `.shell`, `npm exec`, `uv run` 등) 임의 실행이 가능하다. **TASK-0018 로 이런 바이너리는 `risk=code-exec` 로 분류되어 등록 시 경고하고 게이트웨이가 확인(ask)을 강제한다**(이름 기반 휴리스틱, 아래 절 3항). 남는 한계: `--shell` 본문 해시 없음, TOCTOU, `setsid` 로 타임아웃 회피 가능성, `cat 절대경로` 로 cwd 밖 읽기(path 타입 변수는 도입하지 않기로 결정, 아래 절 4항). 테스트(TASK-0018): `TestCodeExecClassification`, `TestCodeExecAddRequiresExplicitAckForConfirmNone`, `TestLegacyCodeExecRowStillResolvesButIsForcedToAsk`, `TestCodeExecToolIsForcedToAskEvenWithConfirmNone`, `TestAcknowledgedCodeExecToolRunsWithoutAsking`, `TestRunStageRechecksDenyListAfterBinarySwap` | 0018 (완료) |
 | T2 | **승인(confirm=ask) 메시지 위조** | 모든 동적 값은 하나의 `escapeText` 로 정화해 정적 라벨 뒤 ASCII 따옴표 안에 한 줄로 표시, 비밀은 마스킹(`internal/gateway/confirm.go`, `sanitize.go`). 테스트: `TestConfirmMessageNeutralizesSpoofing`, `TestConfirmMasksSecretKeyNamesRegardlessOfLength`, `TestConfirmScriptInputIsShown` | 키 이름이 평범한 짧은 비밀은 가려지지 않는다. **elicitation 을 광고하지 않는 클라이언트에서는 `confirm=ask` 도구가 항상 거부된다**(안전 쪽 동작; OpenCode 지원은 미확인, 기본값 결정은 후속) | 0020(AC-6) |
 | T3 | **hook 의 안정성** (`forge hook ingest` 가 클라이언트를 막거나 깨뜨림) | hook 은 어떤 실패에도 종료 코드 0 으로 끝나고 타임아웃·패닉을 복구하며 홈이 없으면 만들지 않는다. 테스트: `TestHookFailurePathsDoNotCreateOrFail`, `TestHookTimeouts`, `TestIngestHookRecoversPanic` | `duration_ms` 가 비정상(1e999·문자열·null·객체·음수)이어도 payload 는 기록하고 지연 시간만 미상(NULL)이 된다(TASK-0019, `TestHookDurationDecodingIsLenient`). `FORGE_HOOK_TIMEOUT_MS` 는 비숫자·0·음수면 기본값(2초), 10000 초과는 10000 으로 제한한다(`TestHookTimeoutFromEnv`). 다른 필드의 타입 오류나 깨진 JSON 은 여전히 payload 를 버린다. `TestHookConcurrent32` 는 부하에서 가끔 시간 초과한다(알려진 플레이크) | 0019, 0020 |
 | T4 | **이력(ledger) 프라이버시** | payload(입력·출력 본문)는 **기본 미저장**이고 `settings.record_payload=1` 일 때만 마스킹 후 별도 테이블에 저장(`internal/ledger/record.go`). 테스트: `TestPayloadDefaultOffAndOptIn`, `TestMaskRules`, `TestMaskKeyAndInlineHardening` | 켜는 CLI 명령은 아직 없고(설정 테이블 값으로만), 켜면 마스킹의 한계(M5)가 그대로 적용된다. 이름·시각·호출 횟수는 항상 기록된다 | 0019 |
@@ -77,7 +77,7 @@
 ## 4. 알려진 한계 (과장 없이)
 
 - **실제 Claude Code·OpenCode 로드는 검증하지 않았다.** 생성한 설정을 클라이언트가 실제로 읽는지, 게이트웨이 `clientInfo.name`, elicitation 지원 여부, 도구 이름 64자 한도, 스킬 frontmatter `hooks` 를 클라이언트가 실제로 어떻게 처리하는지는 문서·가짜 클라이언트 기준이다(TASK-0020 AC-5). Linux·Windows 도 검증하지 않았다(검증은 macOS).
-- **deny 목록은 샌드박스가 아니다.** 커스텀 도구 보호는 심층 방어일 뿐이며 코드 실행형 바이너리의 분류는 후속(TASK-0018)이다. MCP 서버·스킬 스크립트·클라이언트가 실행하는 모든 것은 사용자 권한으로 실행된다.
+- **deny 목록은 샌드박스가 아니다.** 커스텀 도구 보호는 심층 방어일 뿐이다. 코드 실행형 바이너리는 이름 기반 휴리스틱으로 분류해 확인(ask)을 강제하지만(TASK-0018) 분류 밖의 이름·래퍼·이름을 바꾼 복사본은 놓친다. 위협 모델과 알려진 한계는 "도구 실행 위협 모델과 code-exec 분류 (TASK-0018)" 절. MCP 서버·스킬 스크립트·클라이언트가 실행하는 모든 것은 사용자 권한으로 실행된다.
 - **미리보기의 위험 패턴은 휴리스틱**이다. 본문의 의미적 인젝션, 난독화된 명령, 스크립트·참조 파일 내용은 탐지하지 못한다.
 - **승인은 "내가 본 내용" 에 대한 것**이다. 해시 고정은 같은 내용임을 보장할 뿐 안전을 보장하지 않는다. MCP 도구 정의 승인은 refresh 로 캐시된 정의에 대한 것이며, 서버 동작(같은 정의 아래의 구현)은 알 수 없다.
 - **`enforce` 는 게이트웨이 경유 노출에만** 적용되고 기본은 꺼져 있다. 변경 탐지는 `refresh` 시점에만 일어난다.
@@ -181,7 +181,57 @@
 - **`${...}` 경고의 음성 시험(AC-NEW ①)**: `$`, 미종결 `${`, `$1`, `$HOME`(중괄호 없음), `$$`, `$(pwd)`, 미종결 `{env:`·`{file:` 인자는 경고를 내지 않는다(`TestNoEnvRefWarningForPlainDollarArguments`).
 - **`-p<값>` 오탐의 일반 잔여(AC-NEW ②)**: 붙여 쓴 `-p` 뒤 값이 숫자·경로·`${ENV}` 가 아니면(예: `-p<uuid>`, `-pl`, `-pipe`) 비밀번호로 보고 **거부**한다(안전한 쪽의 오탐). 이번에 면제를 추가하지 않았다(`-pVALUE` 형태가 실제 비밀번호일 수 있어 값 모양만으로는 구분할 수 없다). 우회: 값을 `-p ${ENV}` 가 아니라 환경변수·설정 파일로 옮기거나 `--password=${ENV}` 형태를 쓴다.
 - **사용자 결정 사항(AC-NEW ③)**: `--strict` 기본값과 `npx -y` 정책은 **바꾸지 않았다**(`--strict` 기본 꺼짐, `npx -y` 는 경고만). 위 "결정 필요(사용자)" 항목이 그대로 유효하다.
-- **이월(AC-1)**: 실행 가능 파일 목록의 위험도 순 표시는 TASK-0018 AC-5 와 함께 설계하도록 이번에는 구현하지 않았다. 현재는 경로 사전순 30개와 나머지 개수만 표시한다(총 개수 경고는 있음).
+- **이월(AC-1) → TASK-0018 AC-5 에서 구현**: 실행 가능 파일 목록은 이제 위험도 순으로 상위 30개를 보이고 나머지는 개수만 표시한다("도구 실행 위협 모델과 code-exec 분류" 절 6항).
+
+### 도구 실행 위협 모델과 code-exec 분류 (TASK-0018)
+
+**1. 신뢰 경계(커스텀 도구)** — 2절 표의 구체화.
+
+| 입력 | 신뢰 | 이유와 처리 |
+|------|------|-------------|
+| 도구 **정의**(argv 템플릿, `--shell` 본문, 스크립트, URL, allowlist, 정책) | **신뢰**: 사용자가 `forge tool add` 로 직접 작성·승인 | 정의가 곧 코드다. Forge 는 정의의 악의를 판별하지 않는다. 다만 실수를 줄이려고 등록 시·로드 시·실행 직전에 정책(셸 금지, deny 목록, 프로그램 자리의 변수 금지, 시크릿 평문 금지)을 다시 검사한다 |
+| 에이전트(모델)가 준 **인자 값** | **비신뢰** | 값은 스키마로 검증된 뒤 **데이터 위치**(argv[2:] 의 한 요소 안, `FORGE_ARG_*` 환경변수, stdin JSON, URL 경로·쿼리)에만 들어간다. 셸이 해석하지 않고, `-` 로 시작하는 값은 기본 거부, 프로그램·서브커맨드 자리의 변수는 기본 거부(`--allow-var-subcommand`) |
+| 도구가 실행하는 **프로그램** | 신뢰(사용자 권한으로 실행) | 프로그램이 *자기 인자*를 코드로 해석하면 데이터가 코드가 된다. 이것이 deny 목록과 code-exec 분류가 다루는 구멍이다 |
+| `FORGE_HOME`/`forge.db` 에 쓸 수 있는 주체 | 신뢰 경계 **안**(방어 대상 아님) | 4절의 DB 쓰기 권한자 항목 |
+
+**2. deny 목록은 샌드박스가 아니다.** `internal/tool/denylist.go` 의 목록(env, xargs, find, awk, sed, make, tar, docker, ssh, 셸, python/node 등)은 *allowlist 에 넣은 첫 프로그램이 다른 프로그램을 실행하는 래퍼*인 경우를 등록·로드·실행 직전에 거부하는 **심층 방어**다. 이름(버전·`.exe` 정규화)과 심볼릭 링크 체인의 모든 이름·최종 대상을 본다. 목록은 열거형이라 완전할 수 없고, 목록에 없는 프로그램이 데이터를 코드로 해석하면 우회된다. 그런 프로그램 중 흔한 것은 아래 3항의 `risk=code-exec` 로 별도 분류한다. 프로세스 격리(파일시스템·네트워크·시스콜 제한)는 하지 않는다 — 도구는 사용자 권한으로 실행된다.
+
+**알려진 한계(남는 것, 의도적)**:
+
+- **DB 쓰기 권한자**: `forge.db`·`~/.forge` 에 쓸 수 있으면 정의·정책·승인 기록·`ack_code_exec` 를 바꿀 수 있다. 로드 시 정책 재검사(`Registry.Resolve`)는 *실수·부분 변조*를 잡을 뿐 방어선이 아니다(파일 권한 0600/0700 과 OS 계정 경계에 의존).
+- **`--shell` 본문 해시 없음**: `--shell` 도구의 스크립트는 argv 한 요소(`sh -c <본문>`)로 DB 에 저장되고, script 도구와 달리 별도 파일·sha256 무결성 기록이 없다. 본문은 위 DB 한계와 같은 신뢰를 받는다. 본문 `{{변수}}` 는 금지이고 인자는 `$FORGE_ARG_<이름>` 환경변수로만 가지만, 본문이 `eval`·`sh -c "$FORGE_ARG_x"` 처럼 값을 코드로 쓰면 분류·검사가 모른다.
+- **TOCTOU**: 경로 해석·deny 검사와 `exec` 사이의 파일 교체는 완전히 막지 못한다. 실행 직전에 PATH 를 다시 풀고 같은 경로·allowlist·deny 목록을 재검사해 창을 줄였다(`runLocal` 의 두 번의 `checkExecutable`; 시험 `TestRunStageRechecksDenyListAfterBinarySwap` 가 세 경우를 시험한다: exec 직전 재검사는 Run 경로에서, 첫 검사는 dry-run 경로에서 각각 단독으로 잡히며 변이로 한쪽씩 제거하면 해당 하위 시험이 실패한다. Run 경로에서는 두 번째 검사가 첫 검사와 중복이라 첫 검사만 지우면 Run 시험은 통과한다 — 첫 검사의 단독 효과는 dry-run 에만 있다). 마지막 검사와 `exec` 호출 사이에 같은 경로의 파일을 바꾸는 경쟁은 남는다.
+- **`setsid` 등으로 타임아웃 회피**: 타임아웃은 프로세스 그룹(`Setpgid`)을 죽인다. 자식이 새 세션·새 그룹(`setsid`, 데몬화)을 만들면 그룹 종료에서 벗어날 수 있다. `setsid` 자체는 deny 목록에 있지만 code-exec 프로그램이 같은 일을 할 수 있다. cgroup·샌드박스는 쓰지 않는다.
+- **deny 목록·분류는 이름 휴리스틱**: 이름을 바꾼 복사본(링크는 따라가지만 복사본은 모름), 래퍼 스크립트(`./run.sh` 가 `npm` 을 부름), 목록에 없는 바이너리, 서브커맨드가 변수로 정해지는 경우는 놓친다. 목록은 시간이 지나면 낡는다.
+- **같은 사용자의 다른 프로세스**: 임시 스크립트·FORGE_HOME 을 같은 사용자가 바꾸는 것은 막지 못한다(0600 임시 사본·0700 디렉터리는 다른 사용자만 막는다).
+
+**3. code-exec 분류(AC-2)**
+
+- **무엇이 code-exec 인가** (`internal/tool/risk.go`, `codeExecExec`): 인자로 받은 코드·스크립트·명령·패키지를 실행하는 프로그램 — `sqlite3`(`.shell`·`.system`), `psql`(백슬래시 `!` 셸 이스케이프), `mysql`·`mariadb`·`mongosh`·`redis-cli`, `npm`·`npx`·`pnpm`·`pnpx`·`yarn`·`bunx`, `uv`·`uvx`·`pipx`·`pip`·`poetry`·`conda`, `bundle`·`gem`·`rake`·`composer`, `swift`·`swiftc`·`java`·`jshell`·`kotlin`·`scala`·`sbt`·`gradle`·`mvn`·`lein`·`dotnet`, `irb`·`ghc`·`runghc`·`ghci`·`julia`·`elixir`·`mix`·`erl`·`dart`·`flutter`·`Rscript`, `open`·`xdg-open`. **서브커맨드로 판정**: `go`(`run generate test install tool get build vet`)·`cargo`(`run test install build bench check script clippy doc fix`) — `go list`·`cargo metadata` 는 아니다. 서브커맨드가 `{{변수}}` 이면 code-exec 로 본다. 이미 deny 목록·셸·인터프리터(python3, node 등)인 이름은 등록 자체가 거부되므로 여기에 없다.
+- **판정 방식**: command 도구의 argv[0] 이름(버전·`.exe` 정규화, 심볼릭 링크 체인의 이름 포함)과 리터럴 인자. `--shell` 도구는 본문을 `;`·`&`·`|`·개행·괄호·백틱으로 나눈 각 조각의 첫 단어(앞의 `VAR=x` 제외)를 본다. script/http 도구는 분류하지 않는다(스크립트는 사용자가 쓴 코드이고 인자는 stdin JSON 데이터).
+- **데이터 모델**: 저장하지 않는다. `Definition.Risk`(`risk=code-exec`)는 읽을 때(`Registry.Get`·`List`, `Validate`) **파생**한다 — 스키마 변경·마이그레이션 0005 가 필요 없다(`db/schema.sql` 불변). 명시 확인(`ack_code_exec`)만 기존 `settings` 테이블의 `tool.ext.<이름>` JSON 확장에 저장한다(`confirm` 은 기존 `tools.confirm` 컬럼). `forge tool list`·`show --json` 에는 필드가 추가될 뿐(`risk`, `policy.ack_code_exec`) 기존 필드는 그대로다.
+- **`forge tool add`**: code-exec 이면 stderr 에 경고를 출력한다(분류 이유, 휴리스틱임, 게이트웨이가 ask 를 강제함). 기본 `confirm` 은 원래 `ask` 이다. **`--confirm none` 은 `--yes-code-exec` 없이는 등록을 거부**한다(오류가 이유와 방법을 설명). `--yes-code-exec` 는 `--confirm none` 일 때만 의미가 있고(그 외는 거부) 등록 시점에만 검사한다(`ValidateNew`; 저장된 행은 로드 시 거부하지 않는다).
+- **게이트웨이 강제**(`effectiveConfirm`): code-exec 이고 confirm 이 `none`(또는 빈 값)이며 `ack_code_exec` 가 없으면 `ask` 로 올린다. `forge_list` 설명에 "(실행 전 사용자 확인 필요)" 가 붙고, 승인 메시지에 `위험: "코드 실행형 프로그램 sqlite3 (risk=code-exec) ..."` 줄이 붙는다. elicitation 이 없는 클라이언트에서는 거부되며 안내문이 `--confirm none --yes-code-exec` 를 알려 준다. `deny` 는 그대로 `deny` 다. `forge tool test`(사용자가 직접 실행)는 영향이 없다.
+- **명시적 allow 를 어떻게 할 것인가(결정)**: `--yes-code-exec` 로 위험을 확인한 `--confirm none` 은 **허용**한다. 근거: (1) 도구 정의는 사용자 작성 신뢰 입력이고 같은 사용자가 이미 임의 명령을 실행할 수 있어 거부는 보안 이득 없이 불편만 준다 — 필요한 것은 *실수로* 코드 실행형을 무확인으로 두지 않는 것이다. (2) elicitation 을 지원하지 않는 클라이언트(OpenCode 는 미확인)에서 ask 도구는 항상 거부되므로 탈출구가 없으면 도구를 쓸 수 없다. (3) 확인이 기록(`ack_code_exec`)으로 남아 `tool show` 에서 보인다. 한계: 플래그만으로 모델 인자가 안전해지지는 않는다.
+- **기존 도구의 호환성(재분류 정책)**: 분류가 파생이라 **업그레이드 즉시 모든 저장된 도구에 적용**된다. 이미 `confirm=none` 으로 등록된 code-exec 도구(예: `sqlite3`)는 **차단·삭제되지 않고** 게이트웨이에서 `ask` 로 확인을 요구받는다(`tool list` 의 CONFIRM 열에 `none→ask(강제)`). 계속 무확인으로 쓰려면 `forge tool add <이름> --replace ... --confirm none --yes-code-exec` 로 한 번 확인한다. 조용히 모두 `ack` 처리(그랜드파더링)하지 않은 이유: 그러면 분류가 기존 도구에 효과가 없어 목적이 사라진다. 확인을 요구하는 쪽이 안전한 기본이다. 영향: elicitation 이 없는 클라이언트에서 기존 무확인 code-exec 도구는 위 재등록 전까지 거부된다. 시험: `TestLegacyCodeExecRowStillResolvesButIsForcedToAsk`.
+- **한계**: 위 2항의 이름 휴리스틱 한계가 그대로다. 고정 argv(변수 없음)의 `npm test` 도 code-exec 로 본다(저장소 코드가 바뀔 수 있어 변수 유무로 가르지 않았다). 래퍼 스크립트·복사본·목록 밖 프로그램, 셸 본문의 `eval`·변수 속 프로그램 이름은 놓친다. `go -C d run` 처럼 서브커맨드가 플래그 뒤에 있으면 앞 4개 인자 안에서만 찾는다.
+
+**4. 인자 경로 제한 검토(AC-3) — 결정: path 타입 변수를 도입하지 않는다.**
+
+- **현재 동작**(시험 `TestPathArgumentsAreNotConfinedByDesign`): 작업 디렉터리(`--cwd`·`working_dir`)는 실행 위치만 제한한다. `cat -- {{file}}` 의 값이 절대 경로(`/etc/hosts`)면 그대로 전달된다(cwd 밖 읽기 가능). `git diff {{ref}}` 에 `--output=…` 을 넣는 것은 기본 거부되는 선행 `-` 규칙으로 막힌다(`--allow-dash` 로 풀면 열린다).
+- **검토한 안**: 스키마 속성에 `x-forge-path`(또는 `format: path`)를 두고 값을 `Clean` + `EvalSymlinks` 한 뒤 cwd 루트 아래인지 확인.
+- **도입하지 않는 이유**: (1) 프로그램마다 인자 해석이 달라(`--output=`, `file:` URL, `~`, 글롭, `-` 로 시작하는 파일, `@file`) 문자열 하나의 경로 검사는 보호하는 것처럼 보이지만 우회된다(거짓 안심이 위험 신호를 가린다). (2) 검사한 경로가 `exec` 시점에도 같다는 보장이 없다(TOCTOU, 심볼릭 링크 교체). (3) 프로그램이 스스로 읽는 파일(설정·include·플러그인)은 막을 수 없다. (4) 실제 요구(특정 디렉터리만 읽기)는 고정 argv·전용 프로그램·script 도구에서 직접 경로를 검증하는 쪽이 더 정확하다. 지금 단계에서는 과대 구현이다.
+- **기록하는 한계**: 모델 인자가 경로이면 cwd 밖 파일을 읽거나 쓰는 프로그램 인자가 될 수 있다. 완화는 (a) 읽기 전용 프로그램만 쓰고, (b) 변수 앞에 `--` 를 두며, (c) 경로가 필요하면 고정 접두를 템플릿에 두거나(`..` 는 막지 못한다) script 도구에서 검증하고, (d) 민감 경로를 읽을 수 있는 프로그램을 도구로 등록하지 않는 것이다. 필요가 구체화되면 별도 태스크에서 `x-forge-path` 를 설계한다(위 한계를 문서화한 채로).
+
+**5. 사소한 결함(AC-4)**: (a) `forge tool add --help` 의 `--allow-var-subcommand` 설명이 백틱(`cat -- {{file}}`)을 값 이름으로 해석해 플래그 줄이 깨지던 것을 작은따옴표로 고쳤다(시험 `TestToolAddHelpFlagNamesAreNotBroken`). (b) Run 단계의 중복 deny 검사를 덮는 TOCTOU 시험 `TestRunStageRechecksDenyListAfterBinarySwap`(등록 때 무해했던 바이너리를 env 링크로 교체: 등록 시점 조회에 보이지 않는 경우, dry-run, 첫 검사 뒤 환경 구성 중에 교체하는 경우; exec 직전 재검사와 dry-run 의 첫 검사는 변이로 제거하면 각각 실패, Run 경로의 첫 검사는 중복이라 단독으로는 잡히지 않음). (c) https→http 리다이렉트를 TLS 목 서버로 시험 `TestHTTPSToHTTPRedirectOverTLS`(기본은 거부되고 평문 서버에 접속하지 않음, `--allow-http` 로 허용돼도 정의 헤더(시크릿)는 http 홉에 전달되지 않음). 시험 전용 `testTLSConfig` 훅(비공개 변수, 프로덕션 nil)을 `internal/tool/http.go` 에 추가했다.
+
+**6. 설치 미리보기의 스크립트 내용(AC-5, TASK-0025 AC-1 이월 포함)**
+
+- **표시 순서**: 실행 가능한 파일(실행 비트·셔뱅·스크립트 확장자)을 경로 사전순이 아니라 **위험도 순**으로 정렬해 상위 30개를 보이고 나머지는 개수(`executables_more`)만 표시한다. 점수: 위험 패턴(있으면 100 + 10×종류 수) > 실행 비트(4) > 셔뱅(2) > 확장자만(1), 같으면 경로 사전순. 위험 패턴이 있는 실행 파일의 전체 개수는 `executables_risky` 와 경고문에 나온다(31번째 이후에 둔 위험 스크립트도 위로 올라온다). 시험 `TestPreviewRiskyScriptBeyondTheLimitIsShownFirst`, `TestPreviewExecutablesAreOrderedByRisk`.
+- **내용 요약**: 텍스트 파일(바이너리 판정 제외)의 **앞 64KiB** 에 위험 패턴 정규식을 적용해 종류만 보여 준다(`risk_patterns`): SKILL.md 와 같은 목록(curl, wget, `| sh`, eval, `base64 -d`, `chmod +x`, `rm -rf`, sudo, ssh, nc)에 스크립트용 패턴(네트워크 호출 API, `os.system`·`subprocess`·`child_process` 같은 프로세스 실행, `~/.ssh`·`.aws`·`.env` 같은 자격 증명 파일 접근)을 더했다. **휴리스틱이며 안전 판정이 아니다**(난독화·분할·인코딩·다른 파일 `source` 는 놓친다). **스크립트 앞부분에 NUL 바이트가 있으면 바이너리로 분류되어 위험 패턴 검사와 첫 줄 표시를 건너뛴다**("텍스트가 아닌 파일" 경고에는 나온다).
+- **첫 줄**: 위험도 상위 **5개** 파일의 **첫 10줄**을 `head` 로 보인다(`head_more` 는 더 있음을 뜻함). 줄은 `textsafe` 로 정화(제어·방향·제로폭 문자는 `\x1b`, `\u202e` 같은 보이는 이스케이프)하고 줄당 160바이트로 자른다. 모든 파일의 첫 줄을 보이지 않는 이유는 출력 폭주 방지다.
+- **출력 호환**: `forge skill add --preview --json` 의 `schema` 는 1 그대로이고, 기존 필드는 모두 유지된 채 `executables[].risk_patterns`·`head`·`head_more` 와 최상위 `executables_risky` 가 **추가**됐다(없으면 생략). 텍스트 출력은 기존 줄 형식에 하위 줄(`위험 패턴:`, ` N| <줄>`)이 붙는다. 안내 문구(`HeuristicNote`, 경고문)는 "스크립트 내용은 검사하지 않음" 에서 "일부를 휴리스틱으로 검사" 로 바뀌었다.
+- **한계**: 전체 파일을 읽지 않는다(앞 64KiB, 첫 10줄). 첫 줄이 무해해도 아래에 악성 코드가 있을 수 있다. 실행 가능하지 않은 파일(문서·데이터)은 내용을 검사하지 않는다. 설치 후 모델이 스크립트를 실행하는 것은 클라이언트의 승인에 달려 있다(S5).
 
 ## 5. 사용자가 해야 할 일 (체크리스트)
 
@@ -191,7 +241,7 @@
 4. **비밀은 `${ENV}` 참조로만** 넣는다(`--env KEY='${KEY}'`, `--header 'Authorization=${TOKEN}'`). 값을 명령줄·설정 파일에 직접 쓰지 않는다. 서버에 필요한 변수만 선언한다.
 5. **`forge doctor` 를 주기적으로 실행한다.** 스킬 저장소 변조(`security.skills`), 승인된 정의와 다른 MCP 도구(`security.mcp`), 백업 권한·개수, 설정 파일 권한을 본다.
 6. **신뢰할 수 없는 저장소에서는 `forge sync --apply` 전에 `--dry-run --diff` 를 확인한다.** 낯선 저장소의 `.mcp.json`·`.claude/settings.json` 은 클라이언트가 명령을 실행할 수 있는 파일이다.
-7. **`confirm=ask` 가 필요한 도구는 elicitation 을 지원하는 클라이언트에서 쓴다.** 코드 실행형 바이너리를 도구로 등록할 때는 deny 목록이 샌드박스가 아님을 기억한다.
+7. **`confirm=ask` 가 필요한 도구는 elicitation 을 지원하는 클라이언트에서 쓴다.** 코드 실행형 바이너리(`sqlite3`, `npm`, `uv`, `go run` 등)를 도구로 등록하면 `risk=code-exec` 경고가 나오고 게이트웨이는 호출마다 확인을 요구한다. `--confirm none --yes-code-exec` 는 인자가 코드로 해석될 수 있음을 이해한 도구에만 쓴다. deny 목록이 샌드박스가 아님을 기억한다.
 8. `~/.forge` 와 `$FORGE_HOME` 은 본인만 쓰게 둔다(권한 0700). 이 디렉터리에 쓰는 다른 프로세스는 신뢰 경계 안에 있다.
 
 ## 6. 이번 태스크에서 추가된 명령 요약

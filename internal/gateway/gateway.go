@@ -429,6 +429,11 @@ func (g *Gateway) isSelfProxy(s *mcp.Info) (bool, string) {
 // TODO(TASK-0018): force "ask" for risk=code-exec tools (sqlite3, npm exec, ...)
 // even when the stored policy says "none".
 func effectiveConfirm(d *tool.Definition) string {
+	if d.ForcedAsk() {
+		// code-exec program (risk=code-exec) with confirm=none and no explicit
+		// acknowledgement (--yes-code-exec): ask anyway, legacy rows included.
+		return tool.ConfirmAsk
+	}
 	if d.Policy.Confirm == "" {
 		return tool.ConfirmNone
 	}

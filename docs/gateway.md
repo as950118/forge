@@ -75,7 +75,7 @@ claude mcp add --scope user forge -- forge mcp serve
 - 마스킹: 값 패턴(알려진 토큰 형태·고엔트로피)뿐 아니라 키 이름 기준으로도 가린다. `token`/`password`/`secret`/`key`/`auth` 등이 든 인자 이름은 값 길이와 관계없이 `***`, 값 안의 `token=abcd1234`·`password: hunter2`·`--opt=token=...` 같은 `key=value` 도 길이와 무관하게 가린다(원장 payload 와 같은 규칙, `ledger.MaskText`). 스크립트 `입력:` 의 JSON 은 키 이름 기준으로 가린다. 한계: 키 이름이 비밀스럽지 않고 값도 토큰처럼 보이지 않는 짧은 비밀(`q="hunter2"`)은 알 수 없다.
 - 클라이언트가 elicitation 을 광고하지 않으면 안전하게 실행을 거부하고 "사용자 확인이 필요한 도구입니다 ... forge tool test 로 직접 실행하거나 정책을 변경하세요" 를 돌려준다. 근거: 확인 수단이 없는데 실행하면 정책이 무력화된다. Claude Code 2.1.311 은 elicitation 을 광고하고 `-p` 에서도 요청을 받지만 사용자 UI 가 없어 기본으로 `cancel` 로 응답하므로 `confirm=ask` 도구는 거부된다(원장 `confirm_refused`). `Elicitation` hook 이 `accept`(`approve=true`)를 돌려주면 실행됐다(실측, docs/clients/claude-code.md §6; 대화형 승인은 이 실행에서 시험하지 않음). OpenCode 지원은 미확인이다.
 - 기본 `forge tool add` 의 confirm 은 `ask` 이므로, 비대화형/미지원 클라이언트에서는 `--confirm none` 으로 등록한 도구만 실행된다.
-- TODO(TASK-0018): 코드 실행형 바이너리(risk=code-exec)를 `none` 이어도 `ask` 로 강제하는 연동 지점은 `effectiveConfirm` 이다.
+- **코드 실행형 프로그램(`risk=code-exec`, TASK-0018)**: `sqlite3`, `npm`/`npx`/`pnpm`/`yarn`, `uv`/`uvx`/`pipx`, `swift`, `java`/`jshell`, `irb`, `go run`, `cargo run`, `open` 등 인자를 코드로 해석할 수 있는 프로그램(이름 기반 휴리스틱, 목록과 한계는 `docs/security.md`)을 실행하는 command 도구는 저장된 confirm 이 `none` 이어도 게이트웨이가 `ask` 로 강제한다(`effectiveConfirm`). 승인 메시지에 `위험:` 줄이 붙고 `forge_list` 설명에 "(실행 전 사용자 확인 필요)" 가 붙는다. 등록 시 `--confirm none` 을 유지하려면 `--yes-code-exec` 로 명시 확인해야 하며(`ack_code_exec` 로 기록), 확인한 도구만 무확인으로 실행된다. 이미 `none` 으로 등록된 code-exec 도구는 막히지 않고 확인을 요구받는다(재등록으로 해제). elicitation 이 없는 클라이언트에서는 거부되며 안내문이 재등록 방법을 알려 준다.
 
 ## 프록시 (보안·수명주기)
 
