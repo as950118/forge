@@ -88,8 +88,11 @@ type Gateway struct {
 	sem    chan struct{}
 	server *sdk.Server
 
-	unkMu   sync.Mutex
-	unknown map[safeName]struct{} // sanitized unknown names already recorded this session
+	unkMu      sync.Mutex
+	unknown    map[safeName]struct{} // invented names already recorded (or being recorded) this session
+	regMisses  int                   // per-attempt miss rows of registered names this session
+	pruned     bool                  // global miss retention already applied by this process
+	pruneTries int
 }
 
 // New validates options and builds the gateway (no I/O yet).
@@ -213,9 +216,9 @@ func (g *Gateway) Serve(ctx context.Context, t sdk.Transport) error {
 
 // ServeStdio serves MCP over this process's stdin/stdout. Stdout is reserved for
 // the protocol: after the transport takes it, os.Stdout is pointed at stderr so
-// that a stray print cannot corrupt the stream. SIGINT/SIGTERM shut down cleanly.
+// that a stray print cannot corrupt the stream. SIGINT/SIGTERM/SIGHUP shut down cleanly (SIGHUP: the terminal of a client started from a shell went away; Go would otherwise die without stopping the children).
 func (g *Gateway) ServeStdio(ctx context.Context) error {
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	out := os.Stdout
 	os.Stdout = os.Stderr

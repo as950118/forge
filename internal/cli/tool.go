@@ -181,6 +181,9 @@ risk=code-exec 로 분류되어 등록 시 경고가 나오고, 게이트웨이�
 			if w := tool.CodeExecWarning(saved); w != "" {
 				fmt.Fprintln(cmd.ErrOrStderr(), w)
 			}
+			if saved.Policy.Confirm == tool.ConfirmAsk {
+				fmt.Fprintln(cmd.ErrOrStderr(), confirmAskNote)
+			}
 			if asJSON {
 				got, err := reg.Get(cmd.Context(), name)
 				if err != nil {
@@ -324,6 +327,13 @@ func toolShowCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON 출력")
 	return cmd
 }
+
+// confirmAskNote tells the registrant what confirm=ask needs from the client (the
+// default is the safe one: a tool nobody can approve is refused, never run).
+const confirmAskNote = `안내: confirm=ask(기본) 도구는 호출마다 클라이언트의 확인 요청(MCP elicitation)으로 사용자 승인을 받습니다. 확인 요청을 지원하지 않거나 사용자 UI 가 없는 환경(Claude Code 의 claude -p 는 요청을 자동 취소, OpenCode 는 지원 미확인)에서는 항상 거부됩니다.
+  - Claude Code: Elicitation hook 이 승인하도록 설정하면 실행됩니다 (docs/clients/claude-code.md §6)
+  - 신뢰하는 도구라면: forge tool add --replace <name> ... --confirm none  (코드 실행형 프로그램은 --yes-code-exec 도 필요하며 위험을 이해한 경우에만)
+  - 직접 실행: forge tool test <name> --args '{...}'`
 
 // confirmShown is the stored confirm, marked when the gateway enforces ask
 // instead (code-exec without acknowledgement).

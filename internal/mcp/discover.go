@@ -24,6 +24,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/heonjinjeong/forge/internal/netsafe"
 	"github.com/heonjinjeong/forge/internal/textsafe"
 )
 
@@ -39,8 +40,11 @@ const (
 	ClassHTTPStatus      = "http_status"
 	ClassAuthRequired    = "auth_required"
 	ClassConnection      = "connection"
-	ClassEnvMissing      = "env_missing"
-	ClassProcessExit     = "process_exit"
+	// ClassBlockedAddress: the connection was refused because the host resolved to a
+	// loopback/private/link-local/metadata address that is not allowed (netsafe).
+	ClassBlockedAddress = "blocked_address"
+	ClassEnvMissing     = "env_missing"
+	ClassProcessExit    = "process_exit"
 )
 
 const (
@@ -434,14 +438,21 @@ func resolveValues(vals []Value, secrets map[string]bool) (map[string]map[string
 type diagTransport struct {
 	base    http.RoundTripper
 	headers map[string]string
-	mu      sync.Mutex
-	status  int
+	// host is the normalized origin (scheme://host:port, see originOf) the headers belong
+	// to. Requests to any other origin (a redirect to another host, port or scheme, e.g.
+	// an https->http downgrade) get none of them: they carry secrets (Authorization)
+	// that must not follow a redirect. "" = every request.
+	host   string
+	mu     sync.Mutex
+	status int
 }
 
 func (t *diagTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	for k, v := range t.headers {
-		req.Header.Set(k, v)
+	if t.host == "" || originOf(req.URL) == t.host {
+		for k, v := range t.headers {
+			req.Header.Set(k, v)
+		}
 	}
 	resp, err := t.base.RoundTrip(req)
 	if err == nil && resp.StatusCode >= 400 {
@@ -582,6 +593,10 @@ func classify(ctx context.Context, err error, in *Info, dt *diagTransport, stder
 			return mk(ClassHTTPStatus, fmt.Sprintf("HTTP %d 응답", s))
 		}
 	}
+	var be *netsafe.BlockedError
+	if errors.As(err, &be) {
+		return mk(ClassBlockedAddress, fmt.Sprintf("연결이 차단되었습니다: 호스트 %s 가 허용되지 않는 주소(%s)로 해석되었습니다", textsafe.Display(be.Host, 80), be.IP))
+	}
 	var oe *net.OpError
 	if errors.As(err, &oe) {
 		return mk(ClassConnection, "서버에 연결할 수 없습니다: "+oe.Error())
@@ -639,6 +654,8 @@ func Hint(class, msg string) string {
 		return "인증이 필요합니다. --header 'Authorization=${ENV_NAME}' 로 토큰 환경변수를 지정하고, 현재 셸에 해당 환경변수가 설정되어 있는지 확인하세요."
 	case ClassConnection:
 		return "주소/포트/네트워크/프록시를 확인하세요. 서버가 실행 중인지도 확인하세요. (stdio 서버에는 ://user:pw@ 자격 증명이 든 HTTPS_PROXY 같은 변수가 전달되지 않습니다: --env HTTPS_PROXY=${HTTPS_PROXY} 로 선언)"
+	case ClassBlockedAddress:
+		return "링크 로컬·클라우드 메타데이터 주소(169.254.x.x 등)는 항상 차단됩니다. 사내망(사설 주소)에 있는 서버라면 신뢰하는 경우에만 forge mcp allow-private <서버> 로 허용하세요. 로컬 개발 서버는 URL 에 localhost 또는 127.0.0.1 을 직접 쓰면 허용됩니다."
 	case ClassEnvMissing:
 		return "참조된 환경변수를 현재 셸에서 export 한 뒤 다시 시도하세요 (값은 Forge 가 저장하지 않습니다)."
 	case ClassProcessExit:

@@ -19,7 +19,11 @@ const (
 	msgNoElicit         = "사용자 확인이 필요한 도구입니다 (confirm=ask). 이 클라이언트는 확인 요청(elicitation)을 지원하지 않아 실행하지 않았습니다: forge tool test 로 직접 실행하거나 정책을 변경하세요 (forge tool add --replace ... --confirm none)"
 	msgNoElicitCodeExec = "사용자 확인이 필요한 도구입니다 (코드 실행형 프로그램, risk=code-exec 는 confirm=none 이어도 확인을 강제합니다). 이 클라이언트는 확인 요청(elicitation)을 지원하지 않아 실행하지 않았습니다: forge tool test 로 직접 실행하거나, 위험을 이해한 경우에만 forge tool add --replace ... --confirm none --yes-code-exec 로 다시 등록하세요"
 	msgDeclined         = "사용자가 실행을 거부했습니다. 도구를 실행하지 않았습니다"
-	msgNoAnswer         = "사용자 확인을 받지 못해 도구를 실행하지 않았습니다 (확인 요청 실패 또는 시간 초과)"
+	// msgCancelled is the answer "cancel": the client dismissed the request without a
+	// decision. Claude Code answers cancel by itself when there is no UI to ask (claude -p,
+	// TASK-0029 measurement), so the text tells the user how to approve or change the policy.
+	msgCancelled = "사용자 확인이 취소되어 도구를 실행하지 않았습니다 (확인 창이 없는 환경 - 예: Claude Code 의 claude -p - 에서는 요청이 자동으로 취소됩니다). 사용자가 승인하려면: Claude Code 는 Elicitation hook 으로 승인하거나(docs/clients/claude-code.md §6), 신뢰하는 도구라면 forge tool add --replace ... --confirm none 으로 정책을 바꾸세요 (코드 실행형 프로그램은 --yes-code-exec 도 필요)"
+	msgNoAnswer  = "사용자 확인을 받지 못해 도구를 실행하지 않았습니다 (확인 요청 실패 또는 시간 초과)"
 )
 
 var approveSchema = map[string]any{
@@ -57,6 +61,9 @@ func (g *Gateway) confirm(ctx context.Context, ss *sdk.ServerSession, def *tool.
 	if err != nil {
 		g.log.Debug("elicit failed", "tool", def.Name, "error", err)
 		return msgNoAnswer, classConfirm
+	}
+	if res.Action == "cancel" {
+		return msgCancelled, classConfirm
 	}
 	if res.Action != "accept" {
 		return msgDeclined, classConfirm

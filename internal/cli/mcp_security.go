@@ -170,6 +170,48 @@ func mcpApproveCmd() *cobra.Command {
 	return cmd
 }
 
+func mcpAllowPrivateCmd() *cobra.Command {
+	var revoke bool
+	cmd := &cobra.Command{
+		Use:   "allow-private <name> [--revoke]",
+		Short: "Allow a remote (http/sse) MCP server to connect to private-network addresses",
+		Long: `원격(http/sse) MCP 서버 연결은 연결 시점에 주소를 검사합니다(DNS 해석 뒤, 리다이렉트 포함):
+링크 로컬·클라우드 메타데이터 주소(169.254.x.x 등)는 항상 차단하고, 이름이 사설/루프백 주소(10.x, 192.168.x, 127.x ...)로
+해석되는 연결도 기본으로 차단합니다. URL 의 호스트가 localhost 또는 사설/루프백 IP 리터럴이면(직접 쓴 로컬 개발 서버)
+이 명령 없이 허용됩니다.
+
+사내망 서버처럼 이름(예: mcp.corp.internal)이 사설 주소로 해석되는 서버를 쓰려면 신뢰하는 경우에만 이 명령으로 허용하세요.
+허용해도 링크 로컬·메타데이터 주소는 계속 차단됩니다. --revoke 로 되돌립니다. stdio 서버에는 해당 없습니다.
+환경변수 프록시(HTTPS_PROXY 등)를 쓰는 연결은 프록시가 대상에 접속하므로 Forge 가 대상 주소를 검사할 수 없습니다(docs/security.md).`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reg, closeFn, err := openMCP(cmd)
+			if err != nil {
+				return err
+			}
+			defer closeFn()
+			info, err := reg.Get(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if info.Transport == mcp.TransportStdio {
+				return fmt.Errorf("%s 는 stdio 서버입니다: allow-private 는 http/sse 서버에만 의미가 있습니다", textsafe.Display(args[0], 80))
+			}
+			if err := reg.SetAllowPrivate(cmd.Context(), args[0], !revoke); err != nil {
+				return err
+			}
+			if revoke {
+				fmt.Fprintf(cmd.OutOrStdout(), "사설 주소 허용 해제: %s\n", textsafe.Display(args[0], 80))
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "사설 주소 허용: %s (루프백·사설·CGNAT 주소로 해석되는 연결을 허용합니다. 링크 로컬·메타데이터 주소는 계속 차단됩니다)\n", textsafe.Display(args[0], 80))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&revoke, "revoke", false, "허용을 해제")
+	return cmd
+}
+
 func mcpPinCmd() *cobra.Command {
 	var on, off bool
 	cmd := &cobra.Command{

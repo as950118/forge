@@ -15,7 +15,7 @@ import (
 
 // RedactionVersion is the masking rule version stored with every payload
 // (ledger_payloads.redaction_version). Bump it when the rules change.
-const RedactionVersion = 4
+const RedactionVersion = 5
 
 const (
 	// MaxStringBytes caps every string value inside a stored payload.
@@ -30,7 +30,11 @@ const (
 var (
 	// "password=hunter2", "Authorization: Bearer xyz", "api_key: abc" embedded in free text.
 	// The value may be quoted ("x" or 'x', spaces allowed inside the quotes).
-	inlineSecretRe = regexp.MustCompile(`(?i)((?:token|secret|passw(?:or)?d|passwd|api[_-]?key|apikey|authorization|credential|cookie|signature)[A-Za-z0-9_-]*\s*[=:]\s*)(?:bearer\s+|basic\s+)?(?:"[^"\n]*"|'[^'\n]*'|[^\s"'&;,]+)`)
+	inlineSecretRe = regexp.MustCompile(`(?i)((?:token|secret|passw(?:or)?d|passwd|api[_-]?key|apikey|authorization|credential|cookie|signature)[A-Za-z0-9_-]*(?:\\?["'])?\s*[=:]\s*)(?:bearer\s+|basic\s+)?(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|[^\s"'&;,]+)`)
+	// The same labels followed by a value in backslash-escaped quotes: JSON text that
+	// was itself put inside a string ({\"api_key\":\"x\"}) or a shell line
+	// (export API_KEY=\"x\"). Runs before inlineEnvRe, which would stop at the quote.
+	inlineEscQuotedRe = regexp.MustCompile(`(?i)((?:token|secret|passw(?:or)?d|passwd|api[_-]?key|apikey|authorization|credential|cookie|signature)[A-Za-z0-9_-]*(?:\\?["'])?\s*[=:]\s*)\\"(?:[^"\\\n]|\\[^"\n])*\\"`)
 	// TOKEN=ab cd: an upper-case environment-variable style name takes the whole
 	// unquoted value up to the next quote, '&', ';', ',' or the end of the line (the
 	// value may contain spaces). Runs before inlineSecretRe.
@@ -163,13 +167,121 @@ func maskString(s string, persist bool) string {
 }
 
 // maskInlineText applies every inline credential pattern (labelled and unlabelled).
+// A label spelled with look-alike characters (fullwidth "\uff54oken=...", a Cyrillic
+// "p\u0430ssword: ...", zero-width characters inside the word) is recognized too: the
+// labelled patterns also run on the folded text (foldInline) and the values they find
+// are masked in the original text, which is otherwise left as it was.
 func maskInlineText(s string) string {
+	s = maskFoldedLabels(s)
+	return maskInlinePlain(s)
+}
+
+func maskInlinePlain(s string) string {
 	s = inlineTokenRe.ReplaceAllString(s, masked)
+	s = inlineEscQuotedRe.ReplaceAllString(s, "${1}"+masked)
 	s = inlineEnvRe.ReplaceAllString(s, "${1}"+masked)
 	s = inlineSecretRe.ReplaceAllString(s, "${1}"+masked)
 	s = inlineFlagRe.ReplaceAllString(s, "${1}"+masked)
 	s = inlineShortFlagRe.ReplaceAllString(s, "${1}${2}"+masked)
 	return urlUserinfoRe.ReplaceAllString(s, "${1}"+masked+"${2}")
+}
+
+// foldRune folds one rune the way foldKey does; drop reports a rune that vanishes.
+func foldRune(r rune) (out rune, drop bool) {
+	switch {
+	case r == 0xAD, r >= 0x200B && r <= 0x200F, r >= 0x202A && r <= 0x202E, r >= 0x2060 && r <= 0x2064, r == 0xFEFF:
+		return 0, true
+	case r >= 0xFF01 && r <= 0xFF5E: // fullwidth ASCII
+		return r - 0xFEE0, false
+	case r == 0x3000:
+		return ' ', false
+	case r >= 0x24B6 && r <= 0x24CF: // circled capital
+		return 'A' + (r - 0x24B6), false
+	case r >= 0x24D0 && r <= 0x24E9: // circled small
+		return 'a' + (r - 0x24D0), false
+	case r >= 0x1D400 && r <= 0x1D6A3: // math alphanumeric letters, 52 per style
+		i := (r - 0x1D400) % 52
+		if i < 26 {
+			return 'A' + i, false
+		}
+		return 'a' + i - 26, false
+	case r >= 0x1D7CE && r <= 0x1D7FF: // math digits, 10 per style
+		return '0' + (r-0x1D7CE)%10, false
+	}
+	return r, false
+}
+
+// foldInline folds free text for label matching: foldRune plus dropped combining
+// marks (Mn) and the Cyrillic/Greek look-alike table (normKey's confusables). It
+// returns the folded text and, for every byte of it, the byte range of the
+// original rune it came from.
+func foldInline(s string) (folded string, from, to []int) {
+	var b strings.Builder
+	for i, r := range s {
+		n := utf8.RuneLen(r)
+		if r == utf8.RuneError {
+			n = 1
+		}
+		fr, drop := foldRune(r)
+		if drop || unicode.Is(unicode.Mn, fr) {
+			continue
+		}
+		if l, ok := confusables[unicode.ToLower(fr)]; ok {
+			fr = l
+		}
+		w := utf8.RuneLen(fr)
+		if w < 0 {
+			fr, w = utf8.RuneError, 3
+		}
+		b.WriteRune(fr)
+		for k := 0; k < w; k++ {
+			from = append(from, i)
+			to = append(to, i+n)
+		}
+	}
+	return b.String(), from, to
+}
+
+// maskFoldedLabels masks the values of labelled secrets whose label only matches
+// after folding. Text that folding does not change is returned as is.
+func maskFoldedLabels(s string) string {
+	f, from, to := foldInline(s)
+	if f == s {
+		return s
+	}
+	type span struct{ a, b int }
+	var spans []span
+	add := func(re *regexp.Regexp, prefixGroup int) {
+		for _, m := range re.FindAllStringSubmatchIndex(f, -1) {
+			vs, ve := m[2*prefixGroup+1], m[1]
+			if vs >= ve {
+				continue
+			}
+			spans = append(spans, span{from[vs], to[ve-1]})
+		}
+	}
+	add(inlineEscQuotedRe, 1)
+	add(inlineEnvRe, 1)
+	add(inlineSecretRe, 1)
+	add(inlineFlagRe, 1)
+	add(inlineShortFlagRe, 2)
+	if len(spans) == 0 {
+		return s
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].a < spans[j].a })
+	var out strings.Builder
+	pos := 0
+	for _, sp := range spans {
+		if sp.b <= pos {
+			continue
+		}
+		a := max(sp.a, pos)
+		out.WriteString(s[pos:a])
+		out.WriteString(masked)
+		pos = sp.b
+	}
+	out.WriteString(s[pos:])
+	return out.String()
 }
 
 func uniqueKey(m map[string]any, base string) string {
@@ -229,28 +341,9 @@ var confusables = map[rune]rune{
 func foldKey(k string) string {
 	var b strings.Builder
 	for _, r := range k {
-		switch {
-		case r == 0xAD, r >= 0x200B && r <= 0x200F, r >= 0x202A && r <= 0x202E, r >= 0x2060 && r <= 0x2064, r == 0xFEFF:
-			continue
-		case r >= 0xFF01 && r <= 0xFF5E: // fullwidth ASCII
-			r -= 0xFEE0
-		case r == 0x3000:
-			r = ' '
-		case r >= 0x24B6 && r <= 0x24CF: // circled capital
-			r = 'A' + (r - 0x24B6)
-		case r >= 0x24D0 && r <= 0x24E9: // circled small
-			r = 'a' + (r - 0x24D0)
-		case r >= 0x1D400 && r <= 0x1D6A3: // math alphanumeric letters, 52 per style
-			i := (r - 0x1D400) % 52
-			if i < 26 {
-				r = 'A' + i
-			} else {
-				r = 'a' + i - 26
-			}
-		case r >= 0x1D7CE && r <= 0x1D7FF: // math digits, 10 per style
-			r = '0' + (r-0x1D7CE)%10
+		if fr, drop := foldRune(r); !drop {
+			b.WriteRune(fr)
 		}
-		b.WriteRune(r)
 	}
 	return b.String()
 }
