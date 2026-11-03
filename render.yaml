@@ -1,0 +1,17 @@
+# Render Blueprint for forge serve-api (TASK-0037). See docs/serve-api.md.
+services:
+  - type: web
+    name: forge-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: FORGE_API_TOKEN
+        generateValue: true
+      - key: FORGE_EXPORT_URL
+        sync: false
+      - key: FORGE_PG_CA
+        sync: false
