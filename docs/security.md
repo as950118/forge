@@ -261,3 +261,5 @@
 저장 형식: 스킬 `skill_versions.source_ref` 는 `--ref` 를 준 경우 `<요청 ref>@<커밋>`, 아니면 커밋 해시(기존 의미 유지). 승인 기록은 마이그레이션 `0002_mcp_tool_approvals.sql` 의 `mcp_tool_approvals` 테이블, enforce 는 `settings` 키 `mcp.enforce.<서버>`. `db/schema.sql` 은 이제 모든 마이그레이션을 번호 순으로 이어 붙인 스냅샷이다(`make check-schema`).
 
 - **스킬 설치 승인 해시, 읽기 전용 열기 폴백(TASK-0032 AC-6)**: 레지스트리를 읽기 전용으로 못 열어(미반영 WAL 등) 읽기·쓰기 열기로 폴백한 `forge skill add` 도, 그리고 `forge skill update` 도 승인 후 `Restage` 로 스테이징을 새 디렉터리로 옮기며 승인한 해시와 비교한다(교체된 스테이징은 거부, 이후 `Registry.Add` 도 같은 해시를 요구; 시험은 승인 직후 스테이징을 바꾸는 테스트 전용 훅으로 폴백 `add` 와 `update` 모두 검증). 남은 한계: `Restage` 후 `Add` 가 복사하기까지의 짧은 구간과 같은 사용자 권한의 공격자는 막지 못한다.
+
+- **내보내기(TASK-0036)**: `forge export` 는 허용 목록(이름·종류·횟수·성공률·최근 시각·UTC 일별 집계)만 JSON·Postgres 로 내보낸다. 명령줄·경로·인자·환경변수·헤더·세션·프로젝트 경로·본문은 필드로 존재하지 않는다. Postgres 는 기본 dry-run, 포트 6543 거부, 비밀번호 마스킹, 원격 TLS 필수. 이름은 공개되므로 비밀이 든 이름은 막지 못한다. 자세한 내용은 [export.md](export.md).

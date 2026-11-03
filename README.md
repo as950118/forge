@@ -30,6 +30,7 @@ Forge는 이를 한곳에서 등록·관리하고, 각 CLI가 읽는 형태로 �
 | **프로필** `forge profile` | `create` `add` `remove` `show` `list` `use` `unuse` `current` `delete` `prune-stale` `merge-projects` | 클라이언트·프로젝트별 노출 허용 목록 묶음, 스킬 버전 고정 |
 | **동기화** `forge sync` | (플래그) `--target claude-code\|opencode\|all` `--dry-run` `--diff` `--apply` `--restore` `--list-backups` `--prune-backups` 등 | 레지스트리를 Claude Code(`.claude/skills`, `.mcp.json`, hook)와 OpenCode(`.opencode/skills`, `opencode.json` 의 `mcp`) 설정으로 렌더링. 기본은 계획만, 쓰기 전 백업, 사용자 항목 보존, 충돌 시 중단, 버전 게이팅 |
 | **이력** `forge history` | (목록) `summary` `top` `unused` `misses` `prune` (+ `forge skill misses`) | 호출 원장 조회·집계, 기간·종류·클라이언트 필터, table/json/csv, 없어서 못 쓴 스킬(miss), 오래된 기록 삭제(`prune`, 기본 dry-run) |
+| **내보내기** `forge export` | `--format json` `--to-postgres` `--yes` | 집계·이름만의 스냅샷(명령줄·경로·인자·세션 제외)을 JSON 또는 Postgres(Supabase Session pooler)로 내보내기, Postgres 는 기본 dry-run·`--yes` 시 한 트랜잭션 전체 교체 ([문서](docs/export.md)) |
 | **점검** `forge doctor` | (플래그) `--scope` `--project-dir` `--json` `--strict` | 읽기 전용 상태 점검, 원인과 해결 명령 안내, 보안 점검(스킬 변조·MCP 도구 정의 변경) |
 | **hook** `forge hook` | `ingest` `snippet` | Claude Code hook 이벤트 기록(항상 종료 코드 0), `settings.json` 스니펫 출력 |
 
