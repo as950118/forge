@@ -23,6 +23,7 @@ Forge 의 문서 인덱스입니다. 프로젝트 소개와 설치는 저장소 
 | [`profile.md`](profile.md) | 프로필: 우선순위 규칙, 허용 목록, 활성화 |
 | [`export.md`](export.md) | `forge export`: 집계 스냅샷(허용 목록), JSON, Postgres(Supabase Session pooler) 전체 교체, 검증 상태 |
 | [`serve-api.md`](serve-api.md) | `forge serve-api`: 읽기 전용 조회 API, Bearer 인증(fail closed), 한계·보안 헤더, Docker·Render 배포, 검증 상태 |
+| [`DEPLOY.md`](../DEPLOY.md) | 배포 절차: Supabase(Session pooler·SSL CA), Render Blueprint, Vercel 대시보드(`web/`, 환경변수·인증), keepalive, 보안 주의, 로컬 시연, 미확인 목록 |
 | [`doctor.md`](doctor.md) | `forge doctor`: 점검 항목, 심각도, `--json` 스키마, 버전 게이팅, 읽기 전용 보장 |
 | [`adapter.md`](adapter.md) | 동기화 어댑터 인터페이스와 공통 엔진 |
 | [`security.md`](security.md) | 위협 모델, 완화책과 테스트, 알려진 한계, 사용자 체크리스트 |

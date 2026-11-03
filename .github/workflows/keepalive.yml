@@ -1,0 +1,32 @@
+# Keeps Render (free plan sleeps after 15 min) and Supabase (free projects pause when idle) awake
+# by calling the token-free GET /health/db. No secrets are used. Set the repository VARIABLE
+# FORGE_API_URL (Settings > Secrets and variables > Actions > Variables); without it the job is skipped.
+name: keepalive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      FORGE_API_URL: ${{ vars.FORGE_API_URL }}
+    steps:
+      - name: GET /health/db
+        run: |
+          if [ -z "$FORGE_API_URL" ]; then
+            echo "FORGE_API_URL variable is not set; skipping"
+            exit 0
+          fi
+          case "$FORGE_API_URL" in
+            https://*) ;;
+            *) echo "FORGE_API_URL must start with https://"; exit 1 ;;
+          esac
+          curl --fail --silent --show-error --max-time 90 --retry 2 --retry-delay 10 \
+            --output /dev/null "${FORGE_API_URL%/}/health/db"
+          echo "ok"

@@ -1,0 +1,28 @@
+{
+  "regions": ["sin1"],
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 15,
+      "includeFiles": "api/_static/**"
+    }
+  },
+  "rewrites": [
+    { "source": "/", "destination": "/api/index?p=/" },
+    { "source": "/:path*", "destination": "/api/index?p=/:path*" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "Cache-Control", "value": "private, no-store" },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        }
+      ]
+    }
+  ]
+}

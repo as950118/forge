@@ -59,7 +59,7 @@ forge serve-api --addr 0.0.0.0:8080          # 컨테이너 등에서 명시적�
 3. 서비스 Environment 의 `FORGE_API_TOKEN` 을 대시보드의 서버 측 환경변수로 복사합니다.
 4. 확인: `curl https://<서비스>.onrender.com/health`, 토큰으로 `curl -H "Authorization: Bearer $TOKEN" .../v1/summary`.
 
-Free 플랜은 15분 동안 요청이 없으면 잠들고 첫 요청이 느립니다. Supabase free 프로젝트도 활동이 없으면 일시 중지됩니다. `/health/db` 를 주기적으로 호출하면 둘 다 깨어 있게 할 수 있습니다(이 저장소는 그 호출기를 제공하지 않습니다).
+Free 플랜은 15분 동안 요청이 없으면 잠들고 첫 요청이 느립니다. Supabase free 프로젝트도 활동이 없으면 일시 중지됩니다. `/health/db` 를 주기적으로 호출하면 둘 다 깨어 있게 할 수 있습니다(저장소의 `.github/workflows/keepalive.yml` 이 10분마다 호출합니다. 설정은 [DEPLOY.md](../DEPLOY.md) 를 보세요).
 
 ## 검증 상태
 

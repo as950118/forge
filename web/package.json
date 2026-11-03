@@ -1,0 +1,9 @@
+{
+  "name": "forge-dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Forge read-only dashboard (Vercel function, no dependencies)",
+  "engines": { "node": ">=22" },
+  "scripts": { "test": "node --test" }
+}

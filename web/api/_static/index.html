@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Forge 대시보드</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <h1>Forge 대시보드</h1>
+  <p id="meta" class="muted">불러오는 중...</p>
+</header>
+<main>
+  <div id="status" role="status" class="notice" hidden></div>
+  <section id="daily-section" hidden>
+    <h2>일별 호출 추세 (UTC)</h2>
+    <div id="daily"></div>
+  </section>
+  <section id="skill-section" hidden><h2>스킬</h2><div id="skill"></div></section>
+  <section id="tool-section" hidden><h2>도구</h2><div id="tool"></div></section>
+  <section id="mcp-section" hidden><h2>MCP</h2><div id="mcp"></div></section>
+</main>
+<footer class="muted">집계와 이름만 표시합니다. 명령줄·경로·인자·본문은 포함되지 않습니다.</footer>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
