@@ -9,9 +9,9 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/ledger"
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/ledger"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/tool"
 )
 
 // Refusal texts (Korean). The unsupported text is the guidance required by TASK-0007.

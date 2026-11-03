@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/heonjinjeong/forge/internal/profile"
+	"github.com/as950118/forge/internal/profile"
 	"io"
 	"path/filepath"
 	"strings"
@@ -16,8 +16,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/heonjinjeong/forge/internal/skill"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/skill"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 func skillCmd() *cobra.Command {

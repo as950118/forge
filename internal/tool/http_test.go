@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 const httpSchema = `{"type":"object","properties":{"id":{"type":"string"},"q":{"type":"string"}},"required":["id"]}`

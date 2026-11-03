@@ -13,10 +13,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/skill"
-	"github.com/heonjinjeong/forge/internal/store"
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/skill"
+	"github.com/as950118/forge/internal/store"
+	"github.com/as950118/forge/internal/tool"
 )
 
 type fx struct {

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // Store writes profiles. Every method is one transaction; the handle comes from

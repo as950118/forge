@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/store"
 )
 
 // ---- AC-5: each read-only defense is verified on its own ----------------------

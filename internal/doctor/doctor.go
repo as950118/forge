@@ -29,10 +29,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/clientver"
-	"github.com/heonjinjeong/forge/internal/profile"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/clientver"
+	"github.com/as950118/forge/internal/profile"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // Severity of a check.

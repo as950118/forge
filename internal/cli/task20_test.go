@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 func noRawTerminalChars(t *testing.T, what, out string) {

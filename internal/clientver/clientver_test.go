@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/heonjinjeong/forge/internal/testenv"
+	"github.com/as950118/forge/internal/testenv"
 )
 
 // These tests never run a real claude or opencode: every binary here is a small

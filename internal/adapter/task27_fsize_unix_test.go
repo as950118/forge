@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter"
 )
 
 // The limit is process wide, and go test appends to its own testlog.txt (a cached

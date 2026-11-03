@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/mcp/secretcorpus"
+	"github.com/as950118/forge/internal/mcp/secretcorpus"
 )
 
 // corpusRejects reports whether the registration-time rules refuse the entry in

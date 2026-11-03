@@ -7,8 +7,8 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/heonjinjeong/forge/db"
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/db"
+	"github.com/as950118/forge/internal/store"
 )
 
 // A user-attached MCP server (not in the Forge registry) is not a miss, and an

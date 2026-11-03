@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/mcp/mcptest"
-	"github.com/heonjinjeong/forge/internal/store"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/mcp/mcptest"
+	"github.com/as950118/forge/internal/store"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // dbExec runs a statement against the isolated FORGE_HOME database (simulating

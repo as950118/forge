@@ -10,7 +10,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/tool"
 )
 
 // addCodeExecTool registers a harmless fake "npm" script (the name makes it

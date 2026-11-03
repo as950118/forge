@@ -12,13 +12,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/heonjinjeong/forge/internal/gateway"
-	"github.com/heonjinjeong/forge/internal/ledger"
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/profile"
-	"github.com/heonjinjeong/forge/internal/store"
-	"github.com/heonjinjeong/forge/internal/textsafe"
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/gateway"
+	"github.com/as950118/forge/internal/ledger"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/profile"
+	"github.com/as950118/forge/internal/store"
+	"github.com/as950118/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/tool"
 )
 
 func openMCP(cmd *cobra.Command) (*mcp.Registry, func(), error) {

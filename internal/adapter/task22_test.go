@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 // fakeToken has the shape of a GitHub token (known prefix) and is not a real one.

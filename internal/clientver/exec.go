@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 // Limits of one --version run. Timeout is a variable only so that tests can

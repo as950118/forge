@@ -8,7 +8,7 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/store"
 )
 
 const walWarnBytes = 64 << 20

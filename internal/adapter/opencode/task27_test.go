@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter"
 )
 
 // TASK-0027 AC-12: a backup made while XDG_CONFIG_HOME pointed somewhere else (or

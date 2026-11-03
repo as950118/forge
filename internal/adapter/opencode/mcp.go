@@ -4,10 +4,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/adapter/jsonedit"
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter/jsonedit"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // mcpKey is the top-level object of opencode.json that holds the servers

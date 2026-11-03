@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/heonjinjeong/forge/internal/skill"
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/skill"
+	"github.com/as950118/forge/internal/store"
 )
 
 // openRegistry resolves FORGE_HOME (default ~/.forge), ensures the directory

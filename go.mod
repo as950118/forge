@@ -1,4 +1,4 @@
-module github.com/heonjinjeong/forge
+module github.com/as950118/forge
 
 go 1.27.0
 

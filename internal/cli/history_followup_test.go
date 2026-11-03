@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/history"
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/history"
+	"github.com/as950118/forge/internal/store"
 )
 
 // TASK-0021 AC-6: cobra's English flag errors are Korean, --since garbage has a clear

@@ -10,7 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 // RedactionVersion is the masking rule version stored with every payload

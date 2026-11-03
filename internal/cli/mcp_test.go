@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/clientver"
-	"github.com/heonjinjeong/forge/internal/mcp/mcptest"
-	"github.com/heonjinjeong/forge/internal/testenv"
+	"github.com/as950118/forge/internal/clientver"
+	"github.com/as950118/forge/internal/mcp/mcptest"
+	"github.com/as950118/forge/internal/testenv"
 )
 
 func TestMain(m *testing.M) {

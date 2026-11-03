@@ -20,10 +20,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/ledger"
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/skill"
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/ledger"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/skill"
+	"github.com/as950118/forge/internal/tool"
 )
 
 // EnvActive is set in the environment of every process the gateway starts. A

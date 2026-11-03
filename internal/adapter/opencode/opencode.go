@@ -25,9 +25,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/adapter/claudecode"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter/claudecode"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // Name is the --target value (and the Forge client id used for MCP exposure).

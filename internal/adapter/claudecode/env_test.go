@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/skill"
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/skill"
+	"github.com/as950118/forge/internal/store"
 )
 
 // Supported Claude Code versions and the status of each format item used here.

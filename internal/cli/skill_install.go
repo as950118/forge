@@ -12,10 +12,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/skill"
-	"github.com/heonjinjeong/forge/internal/store"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/skill"
+	"github.com/as950118/forge/internal/store"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // skillGit is the git implementation used by skill add/update/check. nil means

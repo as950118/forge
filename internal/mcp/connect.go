@@ -14,7 +14,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/netsafe"
+	"github.com/as950118/forge/internal/netsafe"
 )
 
 // transportBundle is a ready-to-connect transport plus the diagnostics that

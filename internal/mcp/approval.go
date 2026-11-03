@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // Tool definition approval (TASK-0013). A tool's definition (name + description

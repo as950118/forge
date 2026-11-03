@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/adapter/claudecode"
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter/claudecode"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 func (e *env) orderedPlans() []*planned {

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/store"
 )
 
 func newReg(t *testing.T) (*Registry, string) {

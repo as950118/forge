@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 func TestCodeExecClassification(t *testing.T) {

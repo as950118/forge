@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/adapter/claudecode"
-	"github.com/heonjinjeong/forge/internal/adapter/opencode"
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter/claudecode"
+	"github.com/as950118/forge/internal/adapter/opencode"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 // The security rules live once in internal/adapter (planner.go, skills.go,

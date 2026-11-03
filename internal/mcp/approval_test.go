@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/mcp/mcptest"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/mcp/mcptest"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 func refreshMock(t *testing.T, reg *Registry, name string) *RefreshResult {

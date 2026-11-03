@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/store"
 )
 
 // TASK-0032 AC-2: forge history prune.

@@ -9,9 +9,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/adapter/claudecode"
-	"github.com/heonjinjeong/forge/internal/adapter/opencode"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter/claudecode"
+	"github.com/as950118/forge/internal/adapter/opencode"
 )
 
 // planned is one (target, scope) plan computed for the drift and path checks.

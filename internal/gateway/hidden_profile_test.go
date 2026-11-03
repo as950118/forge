@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/ledger"
-	"github.com/heonjinjeong/forge/internal/profile"
+	"github.com/as950118/forge/internal/ledger"
+	"github.com/as950118/forge/internal/profile"
 )
 
 // TASK-0021 AC-8: a registered tool that the active profile hides is not "unknown":

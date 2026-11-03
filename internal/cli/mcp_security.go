@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 func approvalLabel(a string) string {

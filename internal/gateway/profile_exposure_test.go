@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/profile"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/profile"
 )
 
 func profileEnv(t *testing.T) (*env, *profile.Store) {

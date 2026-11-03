@@ -3,7 +3,7 @@ package doctor
 import (
 	"fmt"
 
-	"github.com/heonjinjeong/forge/internal/clientver"
+	"github.com/as950118/forge/internal/clientver"
 )
 
 // checkClients detects the client binaries and gates their versions. This is the

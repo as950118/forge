@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/store"
 )
 
 // TASK-0024 follow-ups of forge doctor and profile.

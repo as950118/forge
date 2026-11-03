@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/heonjinjeong/forge/internal/doctor"
-	"github.com/heonjinjeong/forge/internal/store"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/doctor"
+	"github.com/as950118/forge/internal/store"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 func doctorCmd() *cobra.Command {

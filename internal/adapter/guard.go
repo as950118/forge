@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // claudeUserFile is the Claude Code user-level state file. It mixes secrets with

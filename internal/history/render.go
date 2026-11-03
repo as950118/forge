@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/heonjinjeong/forge/internal/ledger"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/ledger"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // Output formats.

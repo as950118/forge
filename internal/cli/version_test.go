@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/clientver"
+	"github.com/as950118/forge/internal/clientver"
 )
 
 // fakeClients installs shell scripts called claude/opencode in a temp PATH

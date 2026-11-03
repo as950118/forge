@@ -13,7 +13,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/heonjinjeong/forge/db"
+	"github.com/as950118/forge/db"
 )
 
 func openRaw(t *testing.T) (*sql.DB, string) {

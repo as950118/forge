@@ -24,8 +24,8 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/netsafe"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/netsafe"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // DefaultTimeout bounds one whole discovery attempt (connect + initialize + tools/list).

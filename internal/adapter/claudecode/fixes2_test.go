@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 func plantBait(t *testing.T, path, content string) (string, time.Time) {

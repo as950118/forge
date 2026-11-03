@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/heonjinjeong/forge/internal/cli"
+	"github.com/as950118/forge/internal/cli"
 )
 
 // Injected at build time via -ldflags "-X main.version=...".

@@ -13,10 +13,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/heonjinjeong/forge/internal/history"
-	"github.com/heonjinjeong/forge/internal/ledger"
-	"github.com/heonjinjeong/forge/internal/store"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/history"
+	"github.com/as950118/forge/internal/ledger"
+	"github.com/as950118/forge/internal/store"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // historyOpts are the flags shared by `forge history` and its subcommands.

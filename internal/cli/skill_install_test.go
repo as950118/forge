@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // runSplit runs forge with separate stdout/stderr (the preview goes to stderr).

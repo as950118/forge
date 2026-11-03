@@ -6,10 +6,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/profile"
-	"github.com/heonjinjeong/forge/internal/skill"
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/profile"
+	"github.com/as950118/forge/internal/skill"
+	"github.com/as950118/forge/internal/tool"
 )
 
 // Exposure decides what the gateway shows to a client. client is a Forge client

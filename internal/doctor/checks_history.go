@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/adapter/claudecode"
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter/claudecode"
+	"github.com/as950118/forge/internal/store"
 )
 
 const (
