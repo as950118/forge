@@ -35,6 +35,7 @@ func NewRootCmd(info BuildInfo) *cobra.Command {
 		profileCmd(),
 		syncCmd(),
 		historyCmd(),
+		exportCmd(info.Version),
 		doctorCmd(),
 	)
 	return root
