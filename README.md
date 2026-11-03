@@ -19,7 +19,7 @@ Forge는 이를 한곳에서 등록·관리하고, 각 CLI가 읽는 형태로 �
 
 ## 핵심 기능과 구현 현황
 
-아래 명령은 모두 현재 구현되어 있습니다(`forge <명령> --help` 로 확인). 웹 UI와 팀 공유는 아직 없습니다.
+아래 명령은 모두 현재 구현되어 있습니다(`forge <명령> --help` 로 확인). 팀 공유는 아직 없습니다.
 
 | 영역 | 구현된 하위 명령 | 하는 일 |
 |------|------------------|---------|
@@ -32,6 +32,7 @@ Forge는 이를 한곳에서 등록·관리하고, 각 CLI가 읽는 형태로 �
 | **이력** `forge history` | (목록) `summary` `top` `unused` `misses` `prune` (+ `forge skill misses`) | 호출 원장 조회·집계, 기간·종류·클라이언트 필터, table/json/csv, 없어서 못 쓴 스킬(miss), 오래된 기록 삭제(`prune`, 기본 dry-run) |
 | **내보내기** `forge export` | `--format json` `--to-postgres` `--yes` | 집계·이름만의 스냅샷(명령줄·경로·인자·세션 제외)을 JSON 또는 Postgres(Supabase Session pooler)로 내보내기, Postgres 는 기본 dry-run·`--yes` 시 한 트랜잭션 전체 교체 ([문서](docs/export.md)) |
 | **조회 API** `forge serve-api` | `--addr` | 내보낸 집계를 읽기 전용 HTTP API 로 제공(GET/HEAD 만, Bearer 토큰 필수·없으면 시작 거부, `/health`·`/health/db`), Dockerfile·Render Blueprint 포함 ([문서](docs/serve-api.md)) |
+| **웹 대시보드** `web/` | (Vercel) | 스킬·도구·MCP 호출 수·성공률·일별 추세를 보는 읽기 전용 대시보드(의존성 없음, 서버 측 프록시, HTTP Basic 필수·비밀번호 없으면 503). `make test-web` 으로 시험. 배포는 [DEPLOY.md](DEPLOY.md) |
 | **점검** `forge doctor` | (플래그) `--scope` `--project-dir` `--json` `--strict` | 읽기 전용 상태 점검, 원인과 해결 명령 안내, 보안 점검(스킬 변조·MCP 도구 정의 변경) |
 | **hook** `forge hook` | `ingest` `snippet` | Claude Code hook 이벤트 기록(항상 종료 코드 0), `settings.json` 스니펫 출력 |
 
@@ -154,7 +155,7 @@ make demo
 - 스킬 트리 **안의** 하드링크 검사는 아직 없습니다. 승인과 해시 고정은 "내가 본 내용과 같다" 는 것만 보장합니다.
 - 비밀 탐지는 휴리스틱입니다. 파일 경로 인자와 `--ref`·`commit=` 같은 이름 뒤의 40·64자 hex 는 비밀로 보지 않으므로, 접두 없는 비밀을 거기에 넣으면 평문으로 저장될 수 있습니다. 비밀은 항상 `${ENV}` 참조로 넣으세요([`docs/security.md`](docs/security.md)).
 - 이력 DB 스키마가 v5(마이그레이션 0005, 레지스트리 삭제 감사; v4 는 0004)로 올라가므로, 한 번 업그레이드한 `forge.db` 는 이전 forge 바이너리가 "더 최신" 이라며 거부합니다. hook·게이트웨이 이중 기록의 연결은 조건이 맞을 때만 되고(메타 도구 등은 이중 집계로 남음) 마스킹은 `mkdir -p` 같은 `-p` 인자도 가립니다([`docs/security.md`](docs/security.md) 4절).
-- 웹 UI(M6)와 팀 공유(M7)는 구현되지 않았습니다.
+- 팀 공유(M7)는 구현되지 않았습니다. 웹 대시보드(M6)는 읽기 전용이며 실제 클라우드 배포는 확인하지 못했습니다([DEPLOY.md](DEPLOY.md) 8절).
 - 자세한 한계는 [`docs/security.md`](docs/security.md) 4절과 [`docs/sync.md`](docs/sync.md) "한계" 절.
 
 ## ARTEX와의 관계
@@ -178,7 +179,8 @@ ARTEX는 AGPL-3.0 입니다. Forge는 **개념과 데이터 모델만 참고**�
 | 보안 | 설치 미리보기·승인·해시 고정·MCP 도구 정의 고정·위협 모델 | 구현 완료 |
 | 문서 | README, 빠른 시작 가이드, 안전한 시연 | 이 문서 |
 | 예정 | 실제 클라이언트 로드 검증, 도구 위험 분류, 이력 수집 보강 등 후속 | 미정 |
-| M6 / M7 | (선택) 웹 UI / 팀 공유 | 미구현 |
+| M6 | 읽기 전용 웹 대시보드(`web/`, Vercel)와 [DEPLOY.md](DEPLOY.md) | 구현 완료(클라우드 배포는 미확인) |
+| M7 | (선택) 팀 공유 | 미구현 |
 
 상세 계획: [`docs/PLAN.md`](docs/PLAN.md)
 
@@ -190,6 +192,7 @@ Makefile 타깃:
 |------|---------|
 | `make build` | `dist/forge` 빌드 |
 | `make test` | 스키마 스냅샷 검사 후 `go test ./...` |
+| `make test-web` | `web/` 대시보드 시험(`node --test`, Node 22+, npm install 불필요). `make test` 에는 포함되지 않음 |
 | `make test-perf` | 엄격한 시간 한도(`FORGE_PERF_TESTS=1`, 원장 100만 행 시험 포함)로 순차 실행. 한가한 호스트에서만 사용 |
 | `make lint` | `golangci-lint`(없으면 `go vet` + `gofmt` 검사) |
 | `make fmt` | `gofmt -w .` |

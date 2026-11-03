@@ -6,7 +6,7 @@ DATE     ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS  := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 TARGETS  := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
 
-.PHONY: build test test-perf lint fmt check-schema release-snapshot clean demo docs-check quickstart-check
+.PHONY: build test test-web test-perf lint fmt check-schema release-snapshot clean demo docs-check quickstart-check
 
 build:
 	@mkdir -p dist
@@ -14,6 +14,10 @@ build:
 
 test: check-schema
 	go test ./...
+
+# Vercel dashboard (web/) tests: Node 22+ built-in runner, no npm install. Not part of `make test` (Go only).
+test-web:
+	cd web && node --test
 
 # Strict time budgets (hook 2s, doctor/history limits) for an idle machine; the default
 # run only has loose bounds so a busy host does not fail it. Serial packages (-p 1).
