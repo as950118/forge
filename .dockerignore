@@ -1,0 +1,17 @@
+.git
+.gitignore
+.company-os
+.claude
+.agents
+.codex
+AGENTS.md
+CLAUDE.md
+.env
+.env.*
+*.pem
+*.key
+dist
+graphify-out
+docs
+scripts
+*.test
