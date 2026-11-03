@@ -66,13 +66,28 @@ type PrunePlan struct {
 // columns first) instead of scanning every row of the session (the earlier IS
 // comparisons could not use it: cost grew with the square of the session size). Rows
 // whose client or session_id is NULL (no dedup guarantee, ADR-F0002 D1) cannot match
-// by equality and take the second, slower NOT EXISTS; they are rare.
-const eligible = `r.ts < ?1 AND (r.tool_use_id IS NULL OR (
+// by equality; they are judged against recentKeys, the set of groups that have a row
+// at or after the cutoff. The set is uncorrelated, so SQLite builds it once per
+// statement (one pass over ix_ledger_ts) with an ephemeral index and each NULL-keyed
+// row is a single lookup (TASK-0034 AC-1: 60k such rows took about 106 s with a
+// correlated NOT EXISTS that scanned every NULL row per row). A row older than the
+// cutoff is in recentKeys only through another member, so the old q.id <> r.id test
+// is not needed.
+//
+// groupKey spells the group of alias a as ONE json_array text in which NULL and the
+// empty string stay distinct (and any character in an id is escaped). A single text
+// column lets SQLite hash the set; the earlier row-value form (five columns) was
+// compared without an index and was quadratic again.
+func groupKey(a string) string {
+	return "json_array(" + a + ".tool_use_id, " + a + ".client, " + a + ".session_id)"
+}
+
+var recentKeys = `SELECT ` + groupKey("g") + ` FROM ledger g WHERE g.ts >= ?1 AND g.tool_use_id IS NOT NULL AND (g.client IS NULL OR g.session_id IS NULL)`
+
+var eligible = `r.ts < ?1 AND (r.tool_use_id IS NULL OR (
     NOT EXISTS (SELECT 1 FROM ledger q WHERE q.tool_use_id = r.tool_use_id AND q.client = r.client
         AND q.session_id = r.session_id AND q.id <> r.id AND q.ts >= ?1)
-    AND (r.client IS NOT NULL AND r.session_id IS NOT NULL OR NOT EXISTS (
-        SELECT 1 FROM ledger q WHERE q.tool_use_id = r.tool_use_id AND q.session_id IS r.session_id
-            AND q.client IS r.client AND q.id <> r.id AND q.ts >= ?1))))`
+    AND (r.client IS NOT NULL AND r.session_id IS NOT NULL OR ` + groupKey("r") + ` NOT IN (` + recentKeys + `))))`
 
 // PrunePreview counts what Prune(cutoff) would delete without changing anything. It
 // evaluates the eligibility twice (once for the totals, once for the merged-call
@@ -136,8 +151,8 @@ func pruneBatch(ctx context.Context, db *sql.DB, cutoffMS int64, batch int) (int
 		UNION
 		SELECT q.id FROM b JOIN ledger q ON q.tool_use_id = b.tool_use_id AND q.client = b.client AND q.session_id = b.session_id
 		UNION
-		SELECT q.id FROM b JOIN ledger q ON b.tool_use_id IS NOT NULL AND (b.client IS NULL OR b.session_id IS NULL)
-		  AND q.tool_use_id = b.tool_use_id AND q.session_id IS b.session_id AND q.client IS b.client)`, cutoffMS, batch)
+		SELECT q.id FROM ledger q WHERE q.tool_use_id IS NOT NULL AND (q.client IS NULL OR q.session_id IS NULL)
+		  AND `+groupKey("q")+` IN (SELECT `+groupKey("b")+` FROM b WHERE b.tool_use_id IS NOT NULL AND (b.client IS NULL OR b.session_id IS NULL)))`, cutoffMS, batch)
 	if err != nil {
 		return 0, err
 	}

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -165,5 +166,134 @@ func TestMigration0005UpgradePreservesExistingDB(t *testing.T) {
 	mustExec(t, c, `DELETE FROM tools WHERE name='lint'`)
 	if d := deletions(t, c); len(d) != 1 || d[0].name != "lint" || d[0].members != `["global:dev"]` {
 		t.Fatalf("after the upgrade deletions are recorded: %+v", d)
+	}
+}
+
+// TASK-0034 AC-2: the MCP server rows get the same coverage as skills and tools —
+// a project-scoped server removed by its project's cascade is recorded once, with the
+// project path and its members (project profiles included), and the WHEN guard of the
+// child trigger keeps the cascade from recording it a second time.
+func TestMigration0005RecordsMCPCascadeDeletion(t *testing.T) {
+	c, err := Open(context.Background(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	seedRegistry(t, c)
+	mustExec(t, c, `INSERT INTO mcp_servers(id, scope, project_id, name, transport, command) VALUES (2, 'project', 1, 'proj-mcp', 'stdio', 'node')`)
+	mustExec(t, c, `INSERT INTO mcp_servers(id, scope, project_id, name, transport, command) VALUES (3, 'project', 1, 'proj-mcp-lonely', 'stdio', 'node')`)
+	mustExec(t, c, `INSERT INTO profile_members(profile_id, kind, mcp_server_id) VALUES (3,'mcp',2), (1,'mcp',2)`)
+	mustExec(t, c, `DELETE FROM projects WHERE id=1`)
+	byName := map[string][]deletion{}
+	for _, d := range deletions(t, c) {
+		byName[d.name] = append(byName[d.name], d)
+	}
+	if g := byName["proj-mcp"]; len(g) != 1 || g[0] != (deletion{"mcp", "proj-mcp", "project", "/work/app", `["global:dev","project:dev"]`}) {
+		t.Fatalf("project mcp: %+v (want one record, path and both profiles)", g)
+	}
+	if g := byName["proj-mcp-lonely"]; len(g) != 1 || g[0].members != `[]` || g[0].project != "/work/app" {
+		t.Fatalf("memberless project mcp: %+v", g)
+	}
+	var left int
+	if err := c.QueryRow(`SELECT count(*) FROM mcp_servers WHERE project_id IS NOT NULL`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("the cascade itself must be unchanged: %d project servers left (err %v)", left, err)
+	}
+}
+
+// Deleting a project-scoped MCP server on its own (the project stays) is recorded by
+// the child trigger with the project path; a project without children records nothing.
+func TestMigration0005MCPDirectDeleteAndEmptyProject(t *testing.T) {
+	c, err := Open(context.Background(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	seedRegistry(t, c)
+	mustExec(t, c, `INSERT INTO mcp_servers(id, scope, project_id, name, transport, command) VALUES (2, 'project', 1, 'proj-mcp', 'stdio', 'node')`)
+	mustExec(t, c, `INSERT INTO profile_members(profile_id, kind, mcp_server_id) VALUES (3,'mcp',2)`)
+	mustExec(t, c, `DELETE FROM mcp_servers WHERE id=2`)
+	if d := deletions(t, c); len(d) != 1 || d[0] != (deletion{"mcp", "proj-mcp", "project", "/work/app", `["project:dev"]`}) {
+		t.Fatalf("direct delete: %+v", d)
+	}
+	mustExec(t, c, `INSERT INTO projects(id, path, name) VALUES (2, '/work/empty', 'empty')`)
+	mustExec(t, c, `DELETE FROM projects WHERE id=2`)
+	if d := deletions(t, c); len(d) != 1 {
+		t.Fatalf("a project without registry items must record nothing: %+v", d)
+	}
+}
+
+// The WHEN guard of the child triggers (N10): a child whose project row is already
+// gone is not recorded by the child trigger. That state only exists with foreign keys
+// OFF (the cascade is then skipped too), which Forge never uses; it pins the guard for
+// all three kinds. Global rows (project_id IS NULL) are always recorded.
+func TestMigration0005ChildTriggerGuardSkipsOrphanedProject(t *testing.T) {
+	c, err := Open(context.Background(), filepath.Join(t.TempDir(), "forge.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	seedRegistry(t, c)
+	mustExec(t, c, `INSERT INTO tools(id, scope, project_id, name, kind, description, command) VALUES (2, 'project', 1, 'proj-tool', 'command', 'd', 'echo')`)
+	mustExec(t, c, `INSERT INTO mcp_servers(id, scope, project_id, name, transport, command) VALUES (2, 'project', 1, 'proj-mcp', 'stdio', 'node')`)
+	conn, err := c.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	exec := func(q string) {
+		t.Helper()
+		if _, err := conn.ExecContext(context.Background(), q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec(`PRAGMA foreign_keys=OFF`)
+	exec(`DELETE FROM projects WHERE id=1`) // projects trigger records the three children; nothing cascades
+	if n := len(deletions(t, c)); n != 3 {
+		t.Fatalf("project delete records %d, want 3 (skill, tool, mcp)", n)
+	}
+	exec(`DELETE FROM skills WHERE id=3`)
+	exec(`DELETE FROM tools WHERE id=2`)
+	exec(`DELETE FROM mcp_servers WHERE id=2`)
+	if n := len(deletions(t, c)); n != 3 {
+		t.Fatalf("child triggers must skip rows whose project is gone: %d records, want 3", n)
+	}
+	exec(`DELETE FROM mcp_servers WHERE id=1`) // global row: recorded
+	if n := len(deletions(t, c)); n != 4 {
+		t.Fatalf("a global row is always recorded: %d records, want 4", n)
+	}
+}
+
+// TASK-0034 AC-3: with PRAGMA foreign_keys=OFF the ON DELETE CASCADE does not run, but
+// the BEFORE DELETE trigger still records the members that "disappear". Forge always
+// opens its database with foreign_keys ON (OpenRaw), so this only describes a
+// hand-opened database; the record is then a list of memberships that are still there.
+func TestMigration0005ForeignKeysOffRecordsMembersThatSurvive(t *testing.T) {
+	c, err := Open(context.Background(), filepath.Join(t.TempDir(), "forge.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	var fk int
+	if err := c.QueryRow(`PRAGMA foreign_keys`).Scan(&fk); err != nil || fk != 1 {
+		t.Fatalf("Forge must open with foreign_keys ON: %d %v", fk, err)
+	}
+	seedRegistry(t, c)
+	conn, err := c.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(context.Background(), `PRAGMA foreign_keys=OFF`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(context.Background(), `DELETE FROM tools WHERE name='lint'`); err != nil {
+		t.Fatal(err)
+	}
+	if d := deletions(t, c); len(d) != 1 || d[0].members != `["global:dev"]` {
+		t.Fatalf("recorded: %+v", d)
+	}
+	var n int
+	if err := conn.QueryRowContext(context.Background(), `SELECT count(*) FROM profile_members WHERE tool_id=1`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("with foreign keys off the membership is not deleted: %d (err %v)", n, err)
 	}
 }
