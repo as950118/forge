@@ -7,7 +7,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/tool"
 )
 
 // The approval message keeps file paths readable (macOS TMPDIR) but still masks

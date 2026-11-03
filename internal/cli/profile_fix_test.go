@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/clientver"
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/clientver"
+	"github.com/as950118/forge/internal/store"
 )
 
 // ---- helpers ---------------------------------------------------------------

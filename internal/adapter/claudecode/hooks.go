@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/adapter/jsonedit"
-	"github.com/heonjinjeong/forge/internal/ledger"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter/jsonedit"
+	"github.com/as950118/forge/internal/ledger"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 const keySep = " :: "

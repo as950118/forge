@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 const riskyMD = "---\nname: risky-skill\ndescription: Does things.\nlicense: MIT\n" +

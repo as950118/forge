@@ -14,9 +14,9 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/store"
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/store"
+	"github.com/as950118/forge/internal/tool"
 )
 
 // TASK-0020 AC-9: a miss row is written with a short timeout and never under a

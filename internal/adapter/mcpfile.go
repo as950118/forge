@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/heonjinjeong/forge/internal/adapter/jsonedit"
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/adapter/jsonedit"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 var (

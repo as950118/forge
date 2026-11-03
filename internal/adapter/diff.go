@@ -12,9 +12,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/heonjinjeong/forge/internal/ledger"
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/ledger"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // FileDiff is the masked unified diff of one file.

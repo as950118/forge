@@ -3,8 +3,8 @@ package opencode
 import (
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 // A server whose literal env value is a commit id under a commit-named key is

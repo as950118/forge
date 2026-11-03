@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/store"
 )
 
 const goodSkill = "---\nname: demo-skill\ndescription: A demo skill.\nx-custom: keep-me\n---\n# Body\n"

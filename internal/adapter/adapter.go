@@ -19,8 +19,8 @@ import (
 	"io/fs"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/profile"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/profile"
 )
 
 // Scope selects where a sync writes.

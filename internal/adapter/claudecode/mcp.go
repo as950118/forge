@@ -3,9 +3,9 @@ package claudecode
 import (
 	"regexp"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/adapter/jsonedit"
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter/jsonedit"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 // serversKey is the top-level object of .mcp.json that holds the servers.

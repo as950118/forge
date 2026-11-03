@@ -15,9 +15,9 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/mcp/mcptest"
-	"github.com/heonjinjeong/forge/internal/store"
-	"github.com/heonjinjeong/forge/internal/testenv"
+	"github.com/as950118/forge/internal/mcp/mcptest"
+	"github.com/as950118/forge/internal/store"
+	"github.com/as950118/forge/internal/testenv"
 )
 
 func TestMain(m *testing.M) {

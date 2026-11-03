@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/ledger"
-	"github.com/heonjinjeong/forge/internal/store"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/ledger"
+	"github.com/as950118/forge/internal/store"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // seedLedger fills the ledger of the current FORGE_HOME with realistic events

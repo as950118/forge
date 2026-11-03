@@ -16,7 +16,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // Status is the severity of a check result (same words as `forge doctor`).

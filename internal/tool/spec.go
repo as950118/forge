@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 // ScopeGlobal is the only scope implemented so far.

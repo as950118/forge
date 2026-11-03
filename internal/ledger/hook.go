@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/store"
 )
 
 // Claude Code hook adapter (docs/clients/claude-code.md §3, §5).

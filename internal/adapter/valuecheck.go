@@ -4,7 +4,7 @@ import (
 	"errors"
 	"regexp"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 var (

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/mcp/secretcorpus"
+	"github.com/as950118/forge/internal/mcp/secretcorpus"
 )
 
 // textMasked reports whether the display/masking path changes the text (a masked

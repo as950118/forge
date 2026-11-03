@@ -11,9 +11,9 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/ledger"
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/mcp/mcptest"
+	"github.com/as950118/forge/internal/ledger"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/mcp/mcptest"
 )
 
 // failFirst makes the first n ledger writes fail (a rejected or broken write).

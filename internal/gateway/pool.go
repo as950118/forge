@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 // pool holds one lazily created connection per proxied server (created on the

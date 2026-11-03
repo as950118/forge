@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/adapter/claudecode"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter/claudecode"
 )
 
 // syncClaude runs a claude-code sync (hooks off) in the same project/home.

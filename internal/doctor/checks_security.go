@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/heonjinjeong/forge/internal/skill"
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/skill"
+	"github.com/as950118/forge/internal/tool"
 )
 
 const securityGroup = "security"

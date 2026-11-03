@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // Registration preview (TASK-0013): what `forge mcp add` is about to register,

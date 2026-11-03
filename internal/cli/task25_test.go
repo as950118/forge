@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/store"
 )
 
 // TASK-0025 follow-ups of install preview and pinning.

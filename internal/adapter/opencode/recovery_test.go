@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 // Crash consistency (TASK-0010 fix round): a sync killed at ANY point must be

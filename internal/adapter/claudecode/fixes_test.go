@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter"
 )
 
 // ---- item 2: forbidden roots and the Claude Code user file by identity ----

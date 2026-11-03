@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/store"
 )
 
 // hookOpts gives tests a generous per-hook timeout: the production 2s budget is a

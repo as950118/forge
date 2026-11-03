@@ -11,7 +11,7 @@ import (
 
 	_ "modernc.org/sqlite" // pure-Go driver (also registered by internal/store)
 
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/store"
 )
 
 // ErrNotInitialized is returned when forge.db does not exist. Nothing is created.

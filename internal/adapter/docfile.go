@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/heonjinjeong/forge/internal/adapter/jsonedit"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/adapter/jsonedit"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // DocFile is a user-owned JSON config file loaded for in-place editing.

@@ -14,9 +14,9 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/ledger"
-	"github.com/heonjinjeong/forge/internal/skill"
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/ledger"
+	"github.com/as950118/forge/internal/skill"
+	"github.com/as950118/forge/internal/tool"
 )
 
 var (

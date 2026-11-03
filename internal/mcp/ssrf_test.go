@@ -14,8 +14,8 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/mcp/mcptest"
-	"github.com/heonjinjeong/forge/internal/netsafe"
+	"github.com/as950118/forge/internal/mcp/mcptest"
+	"github.com/as950118/forge/internal/netsafe"
 )
 
 // TASK-0020 AC-12. Local test servers only; the lookup is replaced so that no DNS

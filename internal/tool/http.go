@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/netsafe"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/netsafe"
 )
 
 // ssrfError is returned by the dialer when a resolved address is not allowed.

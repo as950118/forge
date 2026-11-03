@@ -10,13 +10,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/adapter/claudecode"
-	"github.com/heonjinjeong/forge/internal/adapter/opencode"
-	"github.com/heonjinjeong/forge/internal/clientver"
-	"github.com/heonjinjeong/forge/internal/profile"
-	"github.com/heonjinjeong/forge/internal/store"
-	"github.com/heonjinjeong/forge/internal/textsafe"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter/claudecode"
+	"github.com/as950118/forge/internal/adapter/opencode"
+	"github.com/as950118/forge/internal/clientver"
+	"github.com/as950118/forge/internal/profile"
+	"github.com/as950118/forge/internal/store"
+	"github.com/as950118/forge/internal/textsafe"
 )
 
 // syncLockTimeout is how long --apply / --restore wait for a concurrent sync.

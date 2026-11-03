@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/skill"
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/skill"
+	"github.com/as950118/forge/internal/store"
 )
 
 // TASK-0032 AC-1: a registry deletion that takes a profile member with it is reported.

@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/heonjinjeong/forge/internal/history"
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/profile"
-	"github.com/heonjinjeong/forge/internal/skill"
+	"github.com/as950118/forge/internal/history"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/profile"
+	"github.com/as950118/forge/internal/skill"
 )
 
 // LoadInputs is LoadInputsFor without a project: only a profile activated for

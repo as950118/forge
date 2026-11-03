@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
+	"github.com/as950118/forge/internal/adapter"
 )
 
 // TASK-0032 AC-11. A failure after an operation that created directories and

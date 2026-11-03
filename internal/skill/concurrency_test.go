@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/heonjinjeong/forge/internal/store"
+	"github.com/as950118/forge/internal/store"
 )
 
 const concN = 8
@@ -79,7 +79,7 @@ func TestConcurrentAddProcesses(t *testing.T) {
 		t.Skip("builds the forge binary")
 	}
 	bin := filepath.Join(t.TempDir(), "forge")
-	if out, err := exec.Command("go", "build", "-o", bin, "github.com/heonjinjeong/forge/cmd/forge").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-o", bin, "github.com/as950118/forge/cmd/forge").CombinedOutput(); err != nil {
 		t.Skipf("cannot build forge binary: %v\n%s", err, out)
 	}
 	home := filepath.Join(t.TempDir(), "home")

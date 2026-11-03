@@ -10,8 +10,8 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/tool"
 )
 
 // approvalLabels are the only line starts a confirmation message may have.

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/store"
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/store"
+	"github.com/as950118/forge/internal/tool"
 )
 
 // Fake credentials only.

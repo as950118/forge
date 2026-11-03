@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/heonjinjeong/forge/internal/profile"
+	"github.com/as950118/forge/internal/profile"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,8 +15,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
-	"github.com/heonjinjeong/forge/internal/tool"
+	"github.com/as950118/forge/internal/mcp"
+	"github.com/as950118/forge/internal/tool"
 )
 
 func openTool(cmd *cobra.Command) (*tool.Registry, func(), error) {

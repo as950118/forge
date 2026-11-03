@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/adapter"
-	"github.com/heonjinjeong/forge/internal/profile"
+	"github.com/as950118/forge/internal/adapter"
+	"github.com/as950118/forge/internal/profile"
 )
 
 // checkProfile: which precedence rule applies per client (project, global or

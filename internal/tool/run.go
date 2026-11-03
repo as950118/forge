@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/heonjinjeong/forge/internal/mcp"
+	"github.com/as950118/forge/internal/mcp"
 )
 
 // Error classes (Result.ErrorClass). Callers (ledger, TASK-0008) can map them to error_class.
