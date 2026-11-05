@@ -53,7 +53,7 @@ func TestDockerfileStatic(t *testing.T) {
 	// no secrets baked in: only PORT may be set with ENV, no ARG/ENV for URL or token
 	for _, l := range lines {
 		u := strings.ToUpper(l)
-		if (strings.HasPrefix(l, "ENV ") || strings.HasPrefix(l, "ARG ")) && (strings.Contains(u, "FORGE_EXPORT_URL") || strings.Contains(u, "TOKEN") || strings.Contains(u, "FORGE_PG_CA") || strings.Contains(u, "PASSWORD") || strings.Contains(u, "SECRET")) {
+		if (strings.HasPrefix(l, "ENV ") || strings.HasPrefix(l, "ARG ")) && (strings.Contains(u, "DB_INDEX") || strings.Contains(u, "TOKEN") || strings.Contains(u, "FORGE_PG_CA") || strings.Contains(u, "PASSWORD") || strings.Contains(u, "SECRET")) {
 			t.Errorf("secret-looking ENV/ARG: %s", l)
 		}
 	}
@@ -95,7 +95,7 @@ func TestRenderBlueprintStatic(t *testing.T) {
 			t.Errorf("render.yaml lacks %q", want)
 		}
 	}
-	for key, attr := range map[string]string{"FORGE_API_TOKEN": "generateValue: true", "FORGE_EXPORT_URL": "sync: false", "FORGE_PG_CA": "sync: false"} {
+	for key, attr := range map[string]string{"FORGE_API_TOKEN": "generateValue: true", "DB_INDEX": "sync: false", "FORGE_PG_CA": "sync: false"} {
 		re := regexp.MustCompile(`- key: ` + key + `\n\s+` + regexp.QuoteMeta(attr))
 		if !re.MatchString(y) {
 			t.Errorf("render.yaml: %s without %s", key, attr)

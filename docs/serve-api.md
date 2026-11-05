@@ -25,14 +25,14 @@ GET/HEAD 만 받습니다. 그 밖의 메서드는 모든 경로에서 405(`Allo
 ## 실행
 
 ```bash
-export FORGE_EXPORT_URL='postgresql://<읽기 전용 역할>:<비밀번호>@<호스트>:5432/postgres'   # Session pooler, 6543 거부
+export DB_INDEX='postgresql://<읽기 전용 역할>:<비밀번호>@<호스트>:5432/postgres'   # Session pooler, 6543 거부
 export FORGE_PG_CA="$(cat prod-ca.crt)"      # 선택
 export FORGE_API_TOKEN="$(openssl rand -hex 24)"
 forge serve-api                              # 기본 127.0.0.1:8080
 forge serve-api --addr 0.0.0.0:8080          # 컨테이너 등에서 명시적으로
 ```
 
-- `FORGE_EXPORT_URL`·`FORGE_PG_CA` 는 `forge export` 와 같은 검증(`6543` 거부, 원격 TLS 필수, 허용되지 않는 URL 매개변수)을 씁니다.
+- `DB_INDEX`·`FORGE_PG_CA` 는 `forge export` 와 같은 검증(`6543` 거부, 원격 TLS 필수, 허용되지 않는 URL 매개변수)을 씁니다.
 - `FORGE_API_TOKEN` 이 비었거나 16자보다 짧으면 **시작하지 않습니다**(fail closed). DB 에 연결하기 전에 확인합니다.
 - 포트: 환경변수 `PORT`(Render)가 있으면 `0.0.0.0:$PORT`, 없으면 `--addr`(기본 `127.0.0.1:8080`). `--addr` 를 직접 주면 `PORT` 보다 우선합니다. 기본값은 loopback 이라 0.0.0.0 바인딩은 `--addr` 나 `PORT` 를 지정했을 때만 일어납니다.
 - SIGTERM/SIGINT 를 받으면 진행 중인 요청을 마친 뒤(최대 10초) 종료합니다.
@@ -52,10 +52,10 @@ forge serve-api --addr 0.0.0.0:8080          # 컨테이너 등에서 명시적�
 저장소 루트의 `Dockerfile` 과 `render.yaml`(Blueprint)을 씁니다.
 
 - `Dockerfile`: 멀티스테이지(`golang` 빌드 → `distroless/static:nonroot`), `CGO_ENABLED=0`, 비루트 사용자(65532), 진입점 `forge serve-api`. 이미지에는 DB URL·토큰을 넣지 않고(실행 시 환경변수), `ENV PORT=8080` 만 기본값으로 둡니다(Render 가 자기 값으로 덮어씁니다).
-- `render.yaml`: web 서비스, `runtime: docker`, `plan: free`, `region: singapore`, `healthCheckPath: /health`, `autoDeploy: true`. `FORGE_API_TOKEN` 은 자동 생성(`generateValue`), `FORGE_EXPORT_URL`·`FORGE_PG_CA` 는 `sync: false` 라 대시보드에서 직접 넣습니다.
+- `render.yaml`: web 서비스, `runtime: docker`, `plan: free`, `region: singapore`, `healthCheckPath: /health`, `autoDeploy: true`. `FORGE_API_TOKEN` 은 자동 생성(`generateValue`), `DB_INDEX`·`FORGE_PG_CA` 는 `sync: false` 라 대시보드에서 직접 넣습니다.
 
 1. Supabase Session pooler URL(가능하면 읽기 전용 역할)을 준비합니다([export.md](export.md)).
-2. Render: **New → Blueprint** 로 저장소를 연결하고 `FORGE_EXPORT_URL`(선택 `FORGE_PG_CA`)을 입력합니다.
+2. Render: **New → Blueprint** 로 저장소를 연결하고 `DB_INDEX`(선택 `FORGE_PG_CA`)을 입력합니다.
 3. 서비스 Environment 의 `FORGE_API_TOKEN` 을 대시보드의 서버 측 환경변수로 복사합니다.
 4. 확인: `curl https://<서비스>.onrender.com/health`, 토큰으로 `curl -H "Authorization: Bearer $TOKEN" .../v1/summary`.
 

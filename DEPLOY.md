@@ -28,7 +28,7 @@
 ## 2. 로컬에서 데이터 넣기
 
 ```bash
-export FORGE_EXPORT_URL='postgresql://postgres.<ref>:<비밀번호>@aws-0-<region>.pooler.supabase.com:5432/postgres'
+export DB_INDEX='postgresql://postgres.<ref>:<비밀번호>@aws-0-<region>.pooler.supabase.com:5432/postgres'
 export FORGE_PG_CA="$(cat prod-ca.crt)"      # 선택
 
 forge export --to-postgres                   # dry-run: 대상(비밀번호 마스킹)과 행 수만 표시, 연결하지 않음
@@ -42,7 +42,7 @@ forge export --to-postgres --yes             # 한 트랜잭션으로 전체 교
 저장소 루트의 `render.yaml`(Blueprint)과 `Dockerfile` 을 씁니다. Docker 빌드, free 플랜, Singapore 리전, health check `/health`, push 시 자동 배포입니다.
 
 1. **New → Blueprint** 로 이 저장소를 연결합니다.
-2. 입력란에 `FORGE_EXPORT_URL`(1단계 Session pooler URL, 가능하면 읽기 전용 역할)과 선택 `FORGE_PG_CA` 를 넣습니다.
+2. 입력란에 `DB_INDEX`(1단계 Session pooler URL, 가능하면 읽기 전용 역할)과 선택 `FORGE_PG_CA` 를 넣습니다.
 3. `FORGE_API_TOKEN` 은 Blueprint 가 자동 생성합니다. 서비스 **Environment** 탭에서 값을 복사해 4단계의 Vercel 환경변수로 넣습니다.
 
 **무료 플랜 제약:** 15분 동안 요청이 없으면 서비스가 잠들고 첫 요청이 느립니다. Supabase free 프로젝트도 일시 중지됩니다.
@@ -92,7 +92,7 @@ curl -s -u "forge:$DASHBOARD_PASSWORD" "$WEB/data/summary" | head -c 300
 - **공개 범위는 집계와 이름뿐입니다.** 종류, 이름(MCP 는 서버 이름 포함), 호출·성공·실패 수, 성공률, 최근 호출 시각, 일별 합계, 생성 시각, Forge 버전. 명령줄·경로·인자·세션·본문은 DB 에도 API 에도 없습니다.
 - **이름에 비밀이 들어가면 그대로 나갑니다.** Forge 는 이름 안의 비밀을 알아보지 못합니다. 비밀이 들어간 이름의 스킬·도구·MCP 서버는 쓰지 마세요.
 - 대시보드 비밀번호는 필수이며 기본값이 없습니다. 추측하기 어려운 12자 이상 값을 쓰세요. 인증은 HTTP Basic 이므로 로그인 시도 제한이 없습니다(긴 무작위 비밀번호로 보완).
-- **토큰 회전:** Render 서비스 Environment 에서 `FORGE_API_TOKEN` 을 새 값(`openssl rand -hex 24`)으로 바꾸고 저장·재배포한 뒤, 같은 값을 Vercel 에 넣고 재배포합니다. 그 사이 대시보드는 잠깐 오류 상태가 됩니다. `DASHBOARD_PASSWORD` 도 Vercel 에서 바꾸고 재배포합니다. DB 비밀번호가 새어 나갔다면 Supabase 에서 재설정하고 `FORGE_EXPORT_URL` 을 갱신합니다.
+- **토큰 회전:** Render 서비스 Environment 에서 `FORGE_API_TOKEN` 을 새 값(`openssl rand -hex 24`)으로 바꾸고 저장·재배포한 뒤, 같은 값을 Vercel 에 넣고 재배포합니다. 그 사이 대시보드는 잠깐 오류 상태가 됩니다. `DASHBOARD_PASSWORD` 도 Vercel 에서 바꾸고 재배포합니다. DB 비밀번호가 새어 나갔다면 Supabase 에서 재설정하고 `DB_INDEX` 을 갱신합니다.
 - 비밀은 저장소에 커밋하지 마세요. 이 저장소의 `render.yaml`·`vercel.json`·워크플로우에는 비밀 값이 없습니다.
 
 ## 7. 로컬 시연 (클라우드 없이 loopback 에서)

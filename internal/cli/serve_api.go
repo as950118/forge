@@ -32,7 +32,7 @@ func serveAPICmd() *cobra.Command {
   GET /v1/items?kind=    skill|tool|mcp              (Bearer 토큰 필요)
   GET /v1/daily?days=N   최근 N일(1..366)            (Bearer 토큰 필요)
 
-환경변수: FORGE_EXPORT_URL(필수, Session pooler URL, 6543 거부), FORGE_PG_CA(선택), FORGE_API_TOKEN(필수, 16자 이상).
+환경변수: DB_INDEX(필수, Session pooler URL, 6543 거부), FORGE_PG_CA(선택), FORGE_API_TOKEN(필수, 16자 이상).
 토큰이 없거나 짧으면 시작하지 않습니다. 포트는 $PORT 가 있으면 0.0.0.0:$PORT, 없으면 --addr(기본 127.0.0.1:8080).
 --addr 를 직접 주면 $PORT 보다 우선합니다. CORS 헤더는 없으며 서버 측 호출을 전제로 합니다.`,
 		Args:          noArgs,

@@ -1,5 +1,5 @@
 # forge serve-api: read-only HTTP API over the exported snapshot (TASK-0037).
-# The image holds no secrets: FORGE_EXPORT_URL, FORGE_API_TOKEN and FORGE_PG_CA
+# The image holds no secrets: DB_INDEX, FORGE_API_TOKEN and FORGE_PG_CA
 # are supplied by the platform at run time. $PORT is read by the program itself.
 ARG GO_VERSION=1.27
 

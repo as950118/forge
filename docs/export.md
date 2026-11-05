@@ -34,7 +34,7 @@ forge export --format json --output snap.json    # 새 파일만, 권한 0600 (�
    **Transaction pooler(포트 6543)는 거부합니다.** 이 내보내기는 한 연결에서 여러 문장을 한 트랜잭션으로 실행하며 스키마를 만들기 때문입니다.
 2. 환경변수를 지정합니다. URL 은 셸 기록에 남지 않게 파일·비밀 관리자에서 읽어 오세요.
    ```bash
-   export FORGE_EXPORT_URL='postgresql://postgres.<ref>:<비밀번호>@aws-0-<region>.pooler.supabase.com:5432/postgres'
+   export DB_INDEX='postgresql://postgres.<ref>:<비밀번호>@aws-0-<region>.pooler.supabase.com:5432/postgres'
    export FORGE_PG_CA="$(cat prod-ca.crt)"     # 선택
    ```
    - `FORGE_PG_CA`: Supabase Database Settings → SSL Configuration 의 CA 인증서(PEM). 줄바꿈을 `\n` 으로 바꾼 한 줄도 됩니다. 있으면 서버 인증서와 호스트 이름을 검증합니다. 없으면 TLS 는 쓰지만 서버 인증서는 검증하지 않습니다(`sslmode=require` 와 같음). 원격 호스트에서는 TLS 가 필수이며 `sslmode=disable|allow|prefer` 는 거부합니다(loopback 은 예외).

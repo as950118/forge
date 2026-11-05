@@ -11,7 +11,7 @@ services:
     envVars:
       - key: FORGE_API_TOKEN
         generateValue: true
-      - key: FORGE_EXPORT_URL
+      - key: DB_INDEX
         sync: false
       - key: FORGE_PG_CA
         sync: false

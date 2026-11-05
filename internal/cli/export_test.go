@@ -59,7 +59,7 @@ func TestExportToPostgresDryRunAndGuards(t *testing.T) {
 	t.Setenv("FORGE_PG_CA", "")
 
 	// dry-run: never connects (the port is closed), masks the password.
-	t.Setenv("FORGE_EXPORT_URL", "postgresql://u:"+pw+"@127.0.0.1:1/postgres")
+	t.Setenv("DB_INDEX", "postgresql://u:"+pw+"@127.0.0.1:1/postgres")
 	out := mustRun(t, "export", "--to-postgres")
 	if strings.Contains(out, pw) || !strings.Contains(out, "dry-run") || !strings.Contains(out, "xxxxx") {
 		t.Fatalf("dry-run output: %s", out)
@@ -72,15 +72,15 @@ func TestExportToPostgresDryRunAndGuards(t *testing.T) {
 	}
 
 	// 6543 is refused even in dry-run.
-	t.Setenv("FORGE_EXPORT_URL", "postgresql://u:"+pw+"@db.example.com:6543/postgres")
+	t.Setenv("DB_INDEX", "postgresql://u:"+pw+"@db.example.com:6543/postgres")
 	out, err = runErr(t, "", "export", "--to-postgres")
 	if err == nil || !strings.Contains(err.Error(), "6543") || strings.Contains(out+err.Error(), pw) {
 		t.Fatalf("6543: err=%v out=%s", err, out)
 	}
 
 	// Missing URL.
-	t.Setenv("FORGE_EXPORT_URL", "")
-	if _, err = runErr(t, "", "export", "--to-postgres"); err == nil || !strings.Contains(err.Error(), "FORGE_EXPORT_URL") {
+	t.Setenv("DB_INDEX", "")
+	if _, err = runErr(t, "", "export", "--to-postgres"); err == nil || !strings.Contains(err.Error(), "DB_INDEX") {
 		t.Fatalf("missing url: %v", err)
 	}
 }

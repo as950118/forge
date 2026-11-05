@@ -30,7 +30,7 @@ func exportCmd(version string) *cobra.Command {
 포함하지 않는 것: 명령줄, 경로, 인자, 환경변수, 헤더, 세션, 프로젝트 경로, 클라이언트, 입출력 본문, 오류 메시지.
 이름의 제어·비가시 문자는 \uXXXX 로 바뀝니다. 이름 자체는 공개되므로 비밀이 들어간 이름은 쓰지 마세요.
 
-Postgres: 환경변수 FORGE_EXPORT_URL(postgresql://사용자:비밀번호@호스트:5432/postgres)에 Supabase 의 Session pooler 연결
+Postgres: 환경변수 DB_INDEX(postgresql://사용자:비밀번호@호스트:5432/postgres)에 Supabase 의 Session pooler 연결
 문자열을 넣습니다. 포트 6543(transaction pooler)은 거부합니다. 선택 FORGE_PG_CA 에 서버 CA PEM 을 넣으면 인증서를 검증합니다.
 URL 의 비밀번호는 출력과 오류에서 가려집니다.`,
 		Args:          noArgs,
@@ -105,7 +105,7 @@ URL 의 비밀번호는 출력과 오류에서 가려집니다.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&format, "format", "", "json")
-	f.BoolVar(&toPG, "to-postgres", false, "Postgres(FORGE_EXPORT_URL)로 내보내기 (기본 dry-run)")
+	f.BoolVar(&toPG, "to-postgres", false, "Postgres(DB_INDEX)로 내보내기 (기본 dry-run)")
 	f.BoolVar(&yes, "yes", false, "--to-postgres 에서 실제로 기록")
 	f.StringVar(&output, "output", "", "JSON 을 파일로 저장 (새 파일만, 권한 0600). - 는 표준 출력")
 	f.BoolVar(&force, "force", false, "--output 대상이 일반 파일이면 덮어쓰기 (심볼릭 링크는 항상 거부)")

@@ -16,8 +16,8 @@ import (
 
 // Env variable names of the Postgres export.
 const (
-	EnvURL = "FORGE_EXPORT_URL" // postgresql://user:password@host:5432/db (Session pooler)
-	EnvCA  = "FORGE_PG_CA"      // optional PEM of the server CA ("\n" may stand for newlines)
+	EnvURL = "DB_INDEX"    // postgresql://user:password@host:5432/db (Session pooler)
+	EnvCA  = "FORGE_PG_CA" // optional PEM of the server CA ("\n" may stand for newlines)
 )
 
 // SchemaName is the Postgres schema that holds the tables (a constant, never input).

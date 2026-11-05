@@ -20,7 +20,7 @@ const (
 func serveEnv(t *testing.T, token, url, port string) {
 	t.Helper()
 	t.Setenv("FORGE_API_TOKEN", token)
-	t.Setenv("FORGE_EXPORT_URL", url)
+	t.Setenv("DB_INDEX", url)
 	t.Setenv("FORGE_PG_CA", "")
 	t.Setenv("PORT", port)
 }
@@ -29,7 +29,7 @@ func TestServeAPIRefusesToStart(t *testing.T) {
 	cases := map[string]struct{ token, url, port, want string }{
 		"no token":         {"", fakePGURL, "", "FORGE_API_TOKEN"},
 		"short token":      {"short-token-15c", fakePGURL, "", "FORGE_API_TOKEN"},
-		"no url":           {fakeAPIToken, "", "", "FORGE_EXPORT_URL"},
+		"no url":           {fakeAPIToken, "", "", "DB_INDEX"},
 		"transaction pool": {fakeAPIToken, "postgresql://u:fakepw-S3cret@h.example.invalid:6543/postgres", "", "6543"},
 		"bad port":         {fakeAPIToken, fakePGURL, "99999", "PORT"},
 	}
